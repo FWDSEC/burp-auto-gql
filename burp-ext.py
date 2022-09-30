@@ -1,5 +1,6 @@
 from __future__ import absolute_import
 import json
+from jarray import array
 
 from urlparse import urlparse
 
@@ -614,14 +615,12 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
         insertion_points = []
         
         gql_req_obj = json.loads( gql_body )
-
-        pdb.set_trace()
         
         json_token_query = u'"query":"'
         prefix_pad = body_offset + gql_body.find( json_token_query ) + len( json_token_query )
         for match in re.finditer( ur'[^$]\w+:\s*[\\"]*([\w*]+)[\\"]*\s*[,)]', gql_req_obj[u'query'] ):
             #insertion_points.append( self.create_insertion_point( match, gql_req, prefix_pad ) )
-            insertion_points.append( [ prefix_pad + match.start(), prefix_pad + match.end() ] )
+            insertion_points.append( array([ prefix_pad + match.start(), prefix_pad + match.end() ], 'i') )
 
         if u'variables' in gql_req_obj.keys():
             json_token_query = u'"variables":{'
@@ -629,7 +628,7 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
             #TODO replace regex with recursion through json object to find leaves, then find position of those leaves in the json string
             for match in re.finditer( ur'":\s?"?([\w]+)"?[,}]', json.dumps( gql_req_obj[u'variables'] ) ):
                 #insertion_points.append( self.create_insertion_point( match, gql_req, prefix_pad ) )
-                insertion_points.append( [ prefix_pad + match.start(), prefix_pad + match.end() ] )
+                insertion_points.append( array([ prefix_pad + match.start(), prefix_pad + match.end() ], 'i') )
 
         pdb.set_trace()
         
