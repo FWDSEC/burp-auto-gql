@@ -485,8 +485,6 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
 
         for qtype in queries.values():
             for query in qtype.values():
-
-                pdb.set_trace()
                         
                 request_bytes = self._helpers.buildHttpMessage(
                     headers,
@@ -517,6 +515,7 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
                         byte[] request,
                         List<int[]> insertionPointOffsets);
                 """
+                #callbacks.sendToIntruder( # Used to debug Insertion Points visually
                 callbacks.doActiveScan(
                         url_parts.hostname,
                         url_parts.port,
@@ -616,24 +615,25 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
         
         gql_req_obj = json.loads( gql_body )
         
-        json_token_query = u'"query":"'
+        json_token_query = u'"query": "'
         prefix_pad = body_offset + gql_body.find( json_token_query ) + len( json_token_query )
-        for match in re.finditer( ur'[^$]\w+:\s*[\\"]*([\w*]+)[\\"]*\s*[,)]', gql_req_obj[u'query'] ):
-            #insertion_points.append( self.create_insertion_point( match, gql_req, prefix_pad ) )
-            insertion_points.append( array([ prefix_pad + match.start(), prefix_pad + match.end() ], 'i') )
+        # The query appears with escape slashes in the HTTP request, but not in the deserialized object. Add them back in.
+        query_w_slashes = re.sub( ur'([\n\t\r"])', ur'\\\1', gql_req_obj['query'] )
+        # TODO: Support all data types. Setting payload data types for Active Scanner is a necessity but doesn't seem to be an API option.
+        # Phase 2 of this TODO is adding support for custom scalars
+        #regex_all_data_types = ur'[^$]\w+:\s*[\\"]*([\w*]+)[\\"]*\s*[,)]'
+        regex_strings_only = ur'[^$]\w+:\s*(?:\\")([\w*]+)(?:\\")\s*[,)]'
+        for match in re.finditer( regex_strings_only, query_w_slashes ):
+            insertion_points.append( array([ prefix_pad + match.start(1), prefix_pad + match.end(1) ], 'i') )
 
         if u'variables' in gql_req_obj.keys():
             json_token_query = u'"variables":{'
             prefix_pad = body_offset + gql_body.find( json_token_query ) + len( json_token_query ) - 2 # 2 because of { used for the token and 
             #TODO replace regex with recursion through json object to find leaves, then find position of those leaves in the json string
             for match in re.finditer( ur'":\s?"?([\w]+)"?[,}]', json.dumps( gql_req_obj[u'variables'] ) ):
-                #insertion_points.append( self.create_insertion_point( match, gql_req, prefix_pad ) )
-                insertion_points.append( array([ prefix_pad + match.start(), prefix_pad + match.end() ], 'i') )
-
-        pdb.set_trace()
+                insertion_points.append( array([ prefix_pad + match.start(1), prefix_pad + match.end(1) ], 'i') )
         
         return insertion_points
-        #return [ InsertionPoint(self._helpers, baseRequestResponse.getRequest(), gql_body) ]
 
     def create_insertion_point( self, re_match, base_request, prefix_pad = 0 ):
 
