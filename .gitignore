@@ -1,4 +1,7 @@
 .DS_Store
 .vscode
 burp/
+dist/
+build/
+main.spec
 gqlutils.py
