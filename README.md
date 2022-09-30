@@ -1,0 +1,1 @@
+# Burp Plugin: Auto GraphQL Scanner
