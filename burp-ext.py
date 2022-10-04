@@ -446,18 +446,14 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
         self._callbacks = callbacks
         self._helpers = callbacks.getHelpers()
 
-        #DEBUG
-        sys.stdout = callbacks.getStdout()
-        sys.stderr = callbacks.getStderr()
-        #END DEBUG
-        
         # set our extension name
         callbacks.setExtensionName(u"Auto GraphQL Scanner")
 
         #DEBUG
-        pdb.set_trace()
+        #sys.stdout = callbacks.getStdout()
+        #sys.stderr = callbacks.getStderr()
+        #pdb.set_trace()
         #END DEBUG
-
 
         # TODO: Add UI element to get this URL from Burp user
         url = u'http://localhost:5013/graphql'
@@ -485,10 +481,16 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
 
         for qtype in queries.values():
             for query in qtype.values():
+
+                query_s = json.dumps( query )
+
+                # Skip endpoints that remove data
+                if any(substring in query_s.lower() for substring in ['delete','remove','clear']):
+                    continue
                         
                 request_bytes = self._helpers.buildHttpMessage(
                     headers,
-                    self._helpers.stringToBytes( json.dumps( query ) )
+                    self._helpers.stringToBytes( query_s )
                 )
                 u"""
                 /**
