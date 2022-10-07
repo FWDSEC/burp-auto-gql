@@ -479,7 +479,7 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
         ]
         queries = self.fetch_queries( url, headers )
 
-        self.scan_queries( queries )
+        self.scan_queries( queries, headers )
         
         # register ourselves as a scanner insertion point provider
         #callbacks.registerScannerInsertionPointProvider(self)
