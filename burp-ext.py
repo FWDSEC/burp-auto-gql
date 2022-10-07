@@ -479,6 +479,16 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
         ]
         queries = self.fetch_queries( url, headers )
 
+        self.scan_queries( queries )
+        
+        # register ourselves as a scanner insertion point provider
+        #callbacks.registerScannerInsertionPointProvider(self)
+
+        return
+
+
+    def scan_queries( self, queries, headers ):
+
         for qtype in queries.values():
             for query in qtype.values():
 
@@ -518,18 +528,13 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
                         List<int[]> insertionPointOffsets);
                 """
                 #callbacks.sendToIntruder( # Used to debug Insertion Points visually
-                callbacks.doActiveScan(
+                self._callbacks.doActiveScan(
                         url_parts.hostname,
                         url_parts.port,
                         url_parts.scheme == 'https',
                         request_bytes,
                         self.getInsertionPoints( request_bytes )
                     )
-        
-        # register ourselves as a scanner insertion point provider
-        #callbacks.registerScannerInsertionPointProvider(self)
-
-        return
 
 
     def fetch_queries( self, gql_endpoint, headers ):
@@ -624,7 +629,7 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
         # TODO: Support all data types. Setting payload data types for Active Scanner is a necessity but doesn't seem to be an API option.
         # Phase 2 of this TODO is adding support for custom scalars
         #regex_all_data_types = ur'[^$]\w+:\s*[\\"]*([\w*]+)[\\"]*\s*[,)]'
-        regex_strings_only = ur'[^$]\w+:\s*(?:\\")([\w*]+)(?:\\")\s*[,)]'
+        regex_strings_only = ur'code\*'
         for match in re.finditer( regex_strings_only, query_w_slashes ):
             insertion_points.append( array([ prefix_pad + match.start(1), prefix_pad + match.end(1) ], 'i') )
 
@@ -632,7 +637,7 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
             json_token_query = u'"variables":{'
             prefix_pad = body_offset + gql_body.find( json_token_query ) + len( json_token_query ) - 2 # 2 because of { used for the token and 
             #TODO replace regex with recursion through json object to find leaves, then find position of those leaves in the json string
-            for match in re.finditer( ur'":\s?"?([\w]+)"?[,}]', json.dumps( gql_req_obj[u'variables'] ) ):
+            for match in re.finditer( regex_strings_only, json.dumps( gql_req_obj[u'variables'] ) ):
                 insertion_points.append( array([ prefix_pad + match.start(1), prefix_pad + match.end(1) ], 'i') )
         
         return insertion_points
