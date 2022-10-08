@@ -22,3 +22,6 @@ On October 18th 2022, it will be ready for you to play with.
 3. Search filter for queries.
 5. Allow for user to manually alter injection points visually.
 6. Allow for payload transformations (base64, etc.)
+
+## Acknowledgements
+1. The transformation on Introspection response, into requests comes from the wonderful inQL extension for Burp. For this reason I have included their Apache license. My plan is to eventually implement my own version of this. Not because it isn't awesome, or because I'm afraid of losing street cred, but because I have some specific needs that will eventually require me to rewrite it.
