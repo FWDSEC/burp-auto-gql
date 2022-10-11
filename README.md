@@ -4,7 +4,9 @@
 On October 18th 2022, it will be ready for you to play with.
 
 ## Debug:
-`java -jar -Xmx1g "/Applications/Burp Suite Professional.app/Contents/Resources/app/burpsuite_pro.jar"`
+1. Run Burp using `java -jar -Xmx1g "/Applications/Burp Suite Professional.app/Contents/Resources/app/burpsuite_pro.jar"`
+2. Add `pdb.set_trace()` anywhere you want a breakpoint.
+3. Go to Burp > Extender > Add and select burp-ext.py
 
 ## Prerequisites
 1. Download Jython Standalone: https://www.jython.org/download.html
