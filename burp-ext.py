@@ -1,5 +1,6 @@
 from __future__ import absolute_import
 import json
+
 from jarray import array
 
 from urlparse import urlparse
@@ -405,13 +406,11 @@ def generate(argument, detect=True):
             rev[k] = t
 
     for qtype, qvalues in s[u'schema'].items():
-        print u"Writing %s Templates" % qtype
         if detect:
             rec = recurse_fields(s, rev, qvalues[u'type'], non_required_levels=2, params_replace=preplace)
         else:
             rec = recurse_fields(s, rev, qvalues[u'type'], non_required_levels=2)
         for qname, qval in rec.items():
-            print u"Writing %s %s" % (qname, qtype)
             body = u"%s {\n\t%s%s\n}" % (qtype, qname, dict_to_qbody(qval, prefix=u'\t'))
             if detect:
                 body = body.replace(u'!', u'')
@@ -420,11 +419,13 @@ def generate(argument, detect=True):
                 queries[qtype] = {}
             queries[qtype][qname] = query
 
-    print u"DONE"
     return queries
 
-from burp import IBurpExtender
-from burp import IScannerInsertionPointProvider
+from burp import IBurpExtender, ITab, IMessageEditorController
+from java.util import ArrayList
+from javax.swing import JTabbedPane, JSplitPane, JScrollPane, JTable, JTextArea
+from javax.swing.table import AbstractTableModel, TableRowSorter
+from java.lang import Boolean, String, Integer
 from urlparse import urlparse
 import sys
 import json
@@ -434,7 +435,7 @@ import re
 import pdb
 #END DEBUG
 
-class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
+class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorController ):
     
     #
     # implement IBurpExtender
@@ -447,19 +448,20 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
         self._helpers = callbacks.getHelpers()
 
         # set our extension name
-        callbacks.setExtensionName(u"Auto GraphQL Scanner")
+        callbacks.setExtensionName( u"Auto GraphQL Scanner" )
+
+        self.gqueries = ArrayList()
 
         #DEBUG
-        #sys.stdout = callbacks.getStdout()
-        #sys.stderr = callbacks.getStderr()
-        #pdb.set_trace()
+        sys.stdout = callbacks.getStdout()
+        sys.stderr = callbacks.getStderr()
         #END DEBUG
 
         # TODO: Add UI element to get this URL from Burp user
-        url = u'http://localhost:5013/graphql'
-        url_parts = urlparse( url )
+        self.gql_endpoint = u'http://localhost:5013/graphql'
+        url_parts = urlparse( self.gql_endpoint )
         # TODO: Add UI element to get request headers from Burp user
-        headers = [
+        self.headers = [
             u'POST '+url_parts.path+' HTTP/1.1',
             u'Host: '+url_parts.netloc,
             u'sec-ch-ua: "Chromium";v="105", "Not)A;Brand";v="8"',
@@ -468,7 +470,7 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
             u'sec-ch-ua-mobile: ?0',
             u'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.5195.102 Safari/537.36',
             u'sec-ch-ua-platform: "macOS"',
-            u'Origin: '+url,
+            u'Origin: '+self.gql_endpoint,
             u'Sec-Fetch-Site: same-origin',
             u'Sec-Fetch-Mode: cors',
             u'Sec-Fetch-Dest: empty',
@@ -477,104 +479,170 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
             u'Cookie: language=en; welcomebanner_status=dismiss; cookieconsent_status=dismiss; continueCode=E3OzQenePWoj4zk293aRX8KbBNYEAo9GL5qO1ZDwp6JyVxgQMmrlv7npKLVy; env=graphiql:disable',
             u'Connection: close'
         ]
-        queries = self.fetch_queries( url, headers )
 
-        self.scan_queries( queries, headers )
-        
-        # register ourselves as a scanner insertion point provider
-        #callbacks.registerScannerInsertionPointProvider(self)
+        self.addUI()
+
+        instrospection_result = self.introspect()
+
+        self.introspection_to_queries( instrospection_result )
+
+        self.scan_queries()
 
         return
 
 
-    def scan_queries( self, queries, headers ):
+    def addUI( self ):
 
-        for qtype in queries.values():
-            for query in qtype.values():
+        print( u"Loading UI..." )
 
-                query_s = json.dumps( query )
+        callbacks = self._callbacks
 
-                # Skip endpoints that remove data
-                if any(substring in query_s.lower() for substring in ['delete','remove','clear']):
-                    continue
-                        
-                request_bytes = self._helpers.buildHttpMessage(
-                    headers,
-                    self._helpers.stringToBytes( query_s )
-                )
-                u"""
-                /**
-                * This method can be used to send an HTTP request to the Burp Scanner tool
-                * to perform an active vulnerability scan, based on a custom list of
-                * insertion points that are to be scanned. If the request is not within the
-                * current active scanning scope, the user will be asked if they wish to
-                * proceed with the scan.
-                *
-                * @param host The hostname of the remote HTTP server.
-                * @param port The port of the remote HTTP server.
-                * @param useHttps Flags whether the protocol is HTTPS or HTTP.
-                * @param request The full HTTP request.
-                * @param insertionPointOffsets A list of index pairs representing the
-                * positions of the insertion points that should be scanned. Each item in
-                * the list must be an int[2] array containing the start and end offsets for
-                * the insertion point.
-                * @return The resulting scan queue item.
-                */
-                IScanQueueItem doActiveScan(
-                        String host,
-                        int port,
-                        boolean useHttps,
-                        byte[] request,
-                        List<int[]> insertionPointOffsets);
-                """
-                #callbacks.sendToIntruder( # Used to debug Insertion Points visually
-                self._callbacks.doActiveScan(
-                        url_parts.hostname,
-                        url_parts.port,
-                        url_parts.scheme == 'https',
-                        request_bytes,
-                        self.getInsertionPoints( request_bytes )
-                    )
+        # main split pane
+        self._splitpane_main = JSplitPane( JSplitPane.VERTICAL_SPLIT )
+
+        # split pane with table and options
+        self._splitpane_inner = JSplitPane( JSplitPane.HORIZONTAL_SPLIT )
+        self._splitpane_main.setLeftComponent( self._splitpane_inner )
+        
+        # table of possible queries
+        gqueries_table = Table(self)
+        gqueries_table.setRowSorter( TableRowSorter(self) )
+        scroll_pane = JScrollPane( gqueries_table )
+        self._splitpane_inner.setLeftComponent( scroll_pane )
+
+        # configuration
+        """
+        self.urlTextInput = JTextArea("http(s)://<host>/graphql", 5)
+        self._splitpane_inner.add( self.urlTextInput )
+        self.headerTextInput = JTextArea("Extra headers", 5, 30)
+        self._splitpane_inner.add( self.headerTextInput )
+        scroll_pane2 = JScrollPane( gqueries_table )
+        self._splitpane_inner.setRightComponent( scroll_pane2 )
+        """
+
+        # tabs with request viewers
+        tabs = JTabbedPane()
+        self._requestViewer = callbacks.createMessageEditor( self, False )
+        tabs.addTab( "Request", self._requestViewer.getComponent() )
+        self._splitpane_main.setRightComponent( tabs )
+        
+        # customize our UI components
+        callbacks.customizeUiComponent( self._splitpane_main )
+        callbacks.customizeUiComponent( gqueries_table )
+        callbacks.customizeUiComponent( scroll_pane )
+        callbacks.customizeUiComponent( tabs )
+        
+        # add the custom tab to Burp's UI
+        callbacks.addSuiteTab( self )
+    
+    
+    #
+    # implement ITab
+    #
+    
+    def getTabCaption(self):
+        return "Auto GQL"
+    
+    def getUiComponent(self):
+        return self._splitpane_main
 
 
-    def fetch_queries( self, gql_endpoint, headers ):
+    #
+    # extend AbstractTableModel
+    #
+
+    def getColumnHeaders( self ):
+        return [
+            "[   ]",
+            "#",
+            "Query Type",
+            "Request Name",
+            "Insertion Points",
+        ]
+    
+    def getRowCount(self):
+        try:
+            return self.gqueries.size()
+        except:
+            return 0
+
+    def getColumnCount(self):
+        return len( self.getColumnHeaders() )
+
+    def getColumnName(self, column_index):
+        cols = self.getColumnHeaders()
+
+        if column_index < len(cols):
+            return cols[ column_index ]
+
+        return ""
+   
+    def getColumnClass( self, column_index ):
+        
+        if column_index == 0:
+            return Boolean
+        if column_index == 1 or column_index == 4:
+            return Integer
+
+        return String
+
+    def getValueAt(self, row_index, column_index):
+        gquery = self.gqueries.get(row_index)
+
+        cols = [
+            True, # Checkbox
+            row_index + 1, # Row number
+            gquery[ 'type' ], #Query Type (Query, Mutation, or Subscription)
+            gquery['name'], # Query Name
+            len( gquery['insertion_points'] ) # Number of Insertion Points
+        ]
+
+        if column_index < len(cols):
+            return cols[ column_index ]
+        
+        return ""
+
+    
+    #
+    # Custom Methods
+    #
+
+    def scan_queries( self ):
+
+        url_parts = urlparse( self.gql_endpoint )
+
+        for gquery in self.gqueries:
+
+            if gquery.enabled == False:
+                continue
+
+            #callbacks.sendToIntruder( # Used to debug Insertion Points visually
+            self._callbacks.doActiveScan(
+                url_parts.hostname,
+                url_parts.port,
+                url_parts.scheme == 'https',
+                gquery.query,
+                gquery.insertion_points
+            )
+
+
+    def introspect( self ):
         
         introspection_query =  u"query IntrospectionQuery{__schema{queryType{name}mutationType{name}subscriptionType{name}types{...FullType}directives{name description locations args{...InputValue}}}}fragment FullType on __Type{kind name description fields(includeDeprecated:true){name description args{...InputValue}type{...TypeRef}isDeprecated deprecationReason}inputFields{...InputValue}interfaces{...TypeRef}enumValues(includeDeprecated:true){name description isDeprecated deprecationReason}possibleTypes{...TypeRef}}fragment InputValue on __InputValue{name description type{...TypeRef}defaultValue}fragment TypeRef on __Type{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name}}}}}}}}"
-        url_parts = urlparse( gql_endpoint )
+        url_parts = urlparse( self.gql_endpoint )
         
-        u"""
-        /**
-        * This method builds an HTTP message containing the specified headers and
-        * message body. If applicable, the Content-Length header will be added or
-        * updated, based on the length of the body.
-        *
-        * @param headers A list of headers to include in the message.
-        * @param body The body of the message, of <code>null</code> if the message
-        * has an empty body.
-        * @return The resulting full HTTP message.
-        */
-        """
         request_bytes = self._helpers.buildHttpMessage(
-            headers,
+            self.headers,
             self._helpers.stringToBytes( '{"query":"'+introspection_query+'"}' )
         )
 
-        u"""
-        /**
-        * This method constructs an <code>IHttpService</code> object based on the
-        * details provided.
-        *
-        * @param host The HTTP service host.
-        * @param port The HTTP service port.
-        * @param protocol The HTTP service protocol.
-        * @return An <code>IHttpService</code> object based on the details
-        * provided.
-        */
-        """
         http_service = self._helpers.buildHttpService(
             url_parts.hostname,
             url_parts.port,
-            url_parts.scheme)
+            url_parts.scheme
+        )
+        
+        print( u"Sending Introspection Query" )
         u"""
         /**
         * This method can be used to issue HTTP requests and retrieve their
@@ -597,20 +665,46 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
         body_offset = gql_res_info.getBodyOffset()
         introspection_result = self._helpers.bytesToString(gql_res)[body_offset:]
 
+        return introspection_result
+
+
+    def introspection_to_queries( self, introspection_result ):
+
         queries = generate( json.loads( introspection_result ) )
 
-        return queries
+        for qtype_nm, qtype in queries.items():
+            for qname,query in qtype.items():
 
-        
-    # 
-    # implement IScannerInsertionPointProvider
-    #
-    
-    #def getInsertionPoints(self, baseRequestResponse):
+                query_s = json.dumps( query )
+
+                # Skip endpoints that remove data
+                # TODO: Move to UI
+                # if any(substring in query_s.lower() for substring in ['delete','remove','clear']):
+                #     continue
+                        
+                request_bytes = self._helpers.buildHttpMessage(
+                    self.headers,
+                    self._helpers.stringToBytes( query_s )
+                )
+
+                self.gqueries.add( {
+                    "type": qtype_nm,
+                    "name": qname,
+                    "query": request_bytes,
+                    "insertion_points": self.getInsertionPoints( request_bytes ),
+                    "enabled": True
+                } )
+
+                # Update table view
+                row = self.gqueries.size() - 1
+                self.fireTableRowsInserted(row, row)
+
+        return self.gqueries
+
+
     def getInsertionPoints( self, gql_req ):
  
         # retrieve the data parameter
-        #gql_req = baseRequestResponse.getRequest()
         gql_req_info = self._helpers.analyzeRequest(gql_req)
         body_offset = gql_req_info.getBodyOffset()
         gql_body = self._helpers.bytesToString(gql_req)[body_offset:]
@@ -629,7 +723,7 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
         # TODO: Support all data types. Setting payload data types for Active Scanner is a necessity but doesn't seem to be an API option.
         # Phase 2 of this TODO is adding support for custom scalars
         #regex_all_data_types = ur'[^$]\w+:\s*[\\"]*([\w*]+)[\\"]*\s*[,)]'
-        regex_strings_only = ur'code\*'
+        regex_strings_only = ur'(code\*)'
         for match in re.finditer( regex_strings_only, query_w_slashes ):
             insertion_points.append( array([ prefix_pad + match.start(1), prefix_pad + match.end(1) ], 'i') )
 
@@ -644,9 +738,26 @@ class BurpExtender(IBurpExtender, IScannerInsertionPointProvider):
 
     def create_insertion_point( self, re_match, base_request, prefix_pad = 0 ):
 
-        pdb.set_trace()
         return self._helpers.makeScannerInsertionPoint(
                     u"InsertionPointName",
                     base_request,
                     prefix_pad + re_match.start(),
                     prefix_pad + re_match.end() )
+
+#
+# extend JTable to handle cell selection
+#
+class Table( JTable ):
+    def __init__(self, extender):
+        self._extender = extender
+        self.setModel(extender)
+    
+    def changeSelection(self, row, col, toggle, extend):
+    
+        # Show the GQL Query for the selected row
+        gquery = self._extender.gqueries.get(row)
+        #analyzed_request = self._extender._helpers.analyzeRequest( gquery['query'] )
+        self._extender._requestViewer.setMessage( self._extender._helpers.bytesToString( gquery['query'] ), True )
+        #self._extender._currentlyDisplayedItem = gquery._requestResponse
+        
+        JTable.changeSelection(self, row, col, toggle, extend)
