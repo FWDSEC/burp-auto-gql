@@ -423,13 +423,15 @@ def generate(argument, detect=True):
 
 from burp import IBurpExtender, ITab, IMessageEditorController
 from java.util import ArrayList
-from javax.swing import JTabbedPane, JSplitPane, JScrollPane, JTable, JTextArea
+from javax.swing import JTabbedPane, JSplitPane, JScrollPane, JFrame, JTable, JLabel, JTextField, JButton, JTextArea
 from javax.swing.table import AbstractTableModel, TableRowSorter
 from java.lang import Boolean, String, Integer
+#from java.awt.event import FocusListener
 from urlparse import urlparse
 import sys
 import json
 import re
+from thread import start_new_thread
 
 #DEBUG
 import pdb
@@ -482,12 +484,6 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
         self.addUI()
 
-        instrospection_result = self.introspect()
-
-        self.introspection_to_queries( instrospection_result )
-
-        self.scan_queries()
-
         return
 
 
@@ -497,37 +493,58 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
         callbacks = self._callbacks
 
-        # main split pane
-        self._splitpane_main = JSplitPane( JSplitPane.VERTICAL_SPLIT )
+        # Main split pane
+        self._splitpane_main = JSplitPane( JSplitPane.HORIZONTAL_SPLIT )
 
-        # split pane with table and options
-        self._splitpane_inner = JSplitPane( JSplitPane.HORIZONTAL_SPLIT )
-        self._splitpane_main.setLeftComponent( self._splitpane_inner )
+        # Top split pane with table and options
+        self._splitpane_left = JSplitPane( JSplitPane.VERTICAL_SPLIT )
+        self._splitpane_main.setLeftComponent( self._splitpane_left )
         
-        # table of possible queries
+        # Queries Table - Top-Left
         gqueries_table = Table(self)
         gqueries_table.setRowSorter( TableRowSorter(self) )
         scroll_pane = JScrollPane( gqueries_table )
-        self._splitpane_inner.setLeftComponent( scroll_pane )
+        self._splitpane_left.setLeftComponent( scroll_pane )
 
-        # configuration
+        # Options - Top-Right
+        frame = JFrame()
+        opts_pane = frame.getContentPane()
+        opts_pane.setLayout( None )
+        
+        label = JLabel("GraphQL Endpoint URL:")
+        label.setBounds( 10, 20, 150, 30 )
+        opts_pane.add( label )
+        
+        placeholder_text = "http(s)://<host>/graphql"
+        txt_input_gql_endpoint = JTextField( self.gql_endpoint if self.gql_endpoint != "" else placeholder_text )
+        txt_input_gql_endpoint.setBounds( 160, 20, 230, 30 )
+        callbacks.customizeUiComponent( txt_input_gql_endpoint )
+        opts_pane.add( txt_input_gql_endpoint )
+        
+        btn_fetch_queries = JButton( "Fetch Queries", actionPerformed=self._pull_queries )
+        btn_fetch_queries.setBounds( 10, 70, 150, 30 )
+        callbacks.customizeUiComponent( btn_fetch_queries )
+        opts_pane.add( btn_fetch_queries )
+        
+        self._splitpane_main.setRightComponent( opts_pane )
         """
-        self.urlTextInput = JTextArea("http(s)://<host>/graphql", 5)
-        self._splitpane_inner.add( self.urlTextInput )
+        self.txt_input_gql_endpoint = JTextArea("http(s)://<host>/graphql", 5)
+        self._splitpane_top.add( self.txt_input_gql_endpoint )
         self.headerTextInput = JTextArea("Extra headers", 5, 30)
-        self._splitpane_inner.add( self.headerTextInput )
+        self._splitpane_top.add( self.headerTextInput )
         scroll_pane2 = JScrollPane( gqueries_table )
-        self._splitpane_inner.setRightComponent( scroll_pane2 )
+        self._splitpane_top.setRightComponent( scroll_pane2 )
         """
 
-        # tabs with request viewers
+        # Request viewer - Bottom-Left
         tabs = JTabbedPane()
         self._requestViewer = callbacks.createMessageEditor( self, False )
         tabs.addTab( "Request", self._requestViewer.getComponent() )
-        self._splitpane_main.setRightComponent( tabs )
+        self._splitpane_left.setRightComponent( tabs )
         
         # customize our UI components
         callbacks.customizeUiComponent( self._splitpane_main )
+        callbacks.customizeUiComponent( opts_pane )
         callbacks.customizeUiComponent( gqueries_table )
         callbacks.customizeUiComponent( scroll_pane )
         callbacks.customizeUiComponent( tabs )
@@ -535,6 +552,15 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         # add the custom tab to Burp's UI
         callbacks.addSuiteTab( self )
     
+
+    def _pull_queries( self, event ):
+
+        start_new_thread( self.pull_queries, (event,) )
+    
+    def pull_queries( self, event ):
+
+        self.introspection_to_queries( self.introspect() )
+
     
     #
     # implement ITab
@@ -590,7 +616,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         gquery = self.gqueries.get(row_index)
 
         cols = [
-            True, # Checkbox
+            gquery['enabled'], # Checkbox
             row_index + 1, # Row number
             gquery[ 'type' ], #Query Type (Query, Mutation, or Subscription)
             gquery['name'], # Query Name
@@ -613,7 +639,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
         for gquery in self.gqueries:
 
-            if gquery.enabled == False:
+            if gquery['enabled'] == False:
                 continue
 
             #callbacks.sendToIntruder( # Used to debug Insertion Points visually
@@ -621,8 +647,8 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
                 url_parts.hostname,
                 url_parts.port,
                 url_parts.scheme == 'https',
-                gquery.query,
-                gquery.insertion_points
+                gquery['query'],
+                gquery['insertion_points']
             )
 
 
@@ -643,18 +669,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         )
         
         print( u"Sending Introspection Query" )
-        u"""
-        /**
-        * This method can be used to issue HTTP requests and retrieve their
-        * responses.
-        *
-        * @param httpService The HTTP service to which the request should be sent.
-        * @param request The full HTTP request.
-        * @return An object that implements the <code>IHttpRequestResponse</code>
-        * interface, and which the extension can query to obtain the details of the
-        * response.
-        */
-        """
+        
         intros_res = self._callbacks.makeHttpRequest(
                 http_service,
                 request_bytes
