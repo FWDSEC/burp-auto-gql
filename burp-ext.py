@@ -423,9 +423,10 @@ def generate(argument, detect=True):
 
 from burp import IBurpExtender, ITab, IMessageEditorController
 from java.util import ArrayList
-from javax.swing import JTabbedPane, JSplitPane, JScrollPane, JFrame, JTable, JLabel, JTextField, JButton, JTextArea
+from javax.swing import JTabbedPane, JSplitPane, JScrollPane, JFrame, JTable, JLabel, JTextField, JButton, JTextArea, JSeparator
 from javax.swing.table import AbstractTableModel, TableRowSorter
 from java.lang import Boolean, String, Integer
+from java.awt import Font
 #from java.awt.event import FocusListener
 from urlparse import urlparse
 import sys
@@ -498,7 +499,8 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         
         # Queries Table - Top-Left
         gqueries_table = Table(self)
-        gqueries_table.setRowSorter( TableRowSorter(self) )
+        # TODO: Disable until I fix the changeSelection to work with sorting
+        #gqueries_table.setRowSorter( TableRowSorter(self) )
         scroll_pane = JScrollPane( gqueries_table )
         self._splitpane_left.setLeftComponent( scroll_pane )
 
@@ -506,24 +508,58 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         frame = JFrame()
         opts_pane = frame.getContentPane()
         opts_pane.setLayout( None )
+
+        opts_inner_y = 0
+
+        label = JLabel("1.")
+        y = 10
+        h = 30
+        opts_inner_y = y+h
+        label.setBounds( 10, y, 30, h )
+        opts_pane.add( label )
+        
+        hbar = JSeparator()
+        hbar.setBounds( 40, y+h/2, 450, h )
+        opts_pane.add( hbar )
         
         label = JLabel("GraphQL Endpoint URL:")
-        label.setBounds( 10, 20, 150, 30 )
+        y = opts_inner_y + 10
+        h = 30
+        opts_inner_y = y+h
+        label.setBounds( 10, y, 150, h )
         opts_pane.add( label )
         
         placeholder_text = "http(s)://<host>/graphql"
         self.txt_input_gql_endpoint = JTextField( self.gql_endpoint if self.gql_endpoint != "" else placeholder_text )
-        self.txt_input_gql_endpoint.setBounds( 160, 20, 230, 30 )
+        self.txt_input_gql_endpoint.setBounds( 160, y, 300, h )
+        self.txt_input_gql_endpoint.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
         callbacks.customizeUiComponent( self.txt_input_gql_endpoint )
         opts_pane.add( self.txt_input_gql_endpoint )
         
         btn_fetch_queries = JButton( "Fetch Queries", actionPerformed=self._pull_queries )
-        btn_fetch_queries.setBounds( 10, 70, 150, 30 )
+        y = opts_inner_y + 10
+        h = 30
+        opts_inner_y = y+h
+        btn_fetch_queries.setBounds( 10, y, 150, h )
         callbacks.customizeUiComponent( btn_fetch_queries )
         opts_pane.add( btn_fetch_queries )
+
+        label = JLabel("2.")
+        y = opts_inner_y + 10
+        h = 30
+        opts_inner_y = y+h
+        label.setBounds( 10, y, 30, h )
+        opts_pane.add( label )
+        
+        hbar = JSeparator()
+        hbar.setBounds( 40, y+h/2, 450, h )
+        opts_pane.add( hbar )
         
         label = JLabel("Custom Request Headers:")
-        label.setBounds( 10, 110, 150, 30 )
+        y = opts_inner_y + 10
+        h = 30
+        opts_inner_y = y+h
+        label.setBounds( 10, y, 150, h )
         opts_pane.add( label )
         
         self.txt_input_headers = JTextArea( self.get_headers_text(), 5, 30 )
@@ -531,13 +567,30 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         self.txt_input_headers.setLineWrap(True)
         scroll_txt_input_headers = JScrollPane( self.txt_input_headers )
         scroll_txt_input_headers.setVerticalScrollBarPolicy( JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED )
-        scroll_txt_input_headers.setBounds( 10, 150, 470, 150 )
+        y = opts_inner_y + 10
+        h = 150
+        opts_inner_y = y+h
+        scroll_txt_input_headers.setBounds( 10, y, 470, h )
         callbacks.customizeUiComponent( self.txt_input_headers )
         callbacks.customizeUiComponent( scroll_txt_input_headers )
         opts_pane.add( scroll_txt_input_headers )
+
+        label = JLabel("3.")
+        y = opts_inner_y + 10
+        h = 30
+        opts_inner_y = y+h
+        label.setBounds( 10, y, 30, h )
+        opts_pane.add( label )
+        
+        hbar = JSeparator()
+        hbar.setBounds( 40, y+h/2, 450, h )
+        opts_pane.add( hbar )
         
         btn_fetch_queries = JButton( "Run Scan", actionPerformed=self._scan_queries )
-        btn_fetch_queries.setBounds( 10, 320, 150, 30 )
+        y = opts_inner_y + 10
+        h = 30
+        opts_inner_y = y+h
+        btn_fetch_queries.setBounds( 10, y, 150, h )
         callbacks.customizeUiComponent( btn_fetch_queries )
         opts_pane.add( btn_fetch_queries )
         
@@ -604,9 +657,9 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         self.gql_endpoint = self.txt_input_gql_endpoint.getText()
         self.set_headers()
         self.draw_headers_text()
-        start_new_thread( self.pull_queries, (event,) )
+        start_new_thread( self.pull_queries, (1,) )
     
-    def pull_queries( self, event ):
+    def pull_queries( self, not_used ):
 
         self.introspection_to_queries( self.introspect() )
 
@@ -662,7 +715,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         return String
 
     def getValueAt(self, row_index, column_index):
-        gquery = self.gqueries.get(row_index)
+        gquery = self.gqueries.get( row_index )
 
         cols = [
             gquery['enabled'], # Checkbox
@@ -682,14 +735,14 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
     # Custom Methods
     #
 
-    def _scan_queries( self ):
+    def _scan_queries( self, event ):
 
         # TODO: (1) Gray out button with info tooltip saying to fetch queries first
         #       (2) Provide feedback that the scan has started
         if self.gqueries.size() > 0:
             start_new_thread( self.scan_queries, (1,) )
 
-    def scan_queries( self ):
+    def scan_queries( self, not_used ):
 
         url_parts = urlparse( self.gql_endpoint )
 
@@ -763,12 +816,14 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
                     self._helpers.stringToBytes( query_s )
                 )
 
+                insertion_points = self.getInsertionPoints( request_bytes )
+
                 self.gqueries.add( {
                     "type": qtype_nm,
                     "name": qname,
                     "query": request_bytes,
-                    "insertion_points": self.getInsertionPoints( request_bytes ),
-                    "enabled": True
+                    "insertion_points": insertion_points,
+                    "enabled": len( insertion_points ) > 0
                 } )
 
                 # Update table view
@@ -829,11 +884,17 @@ class Table( JTable ):
         self.setModel(extender)
     
     def changeSelection(self, row, col, toggle, extend):
+
+        gquery = self._extender.gqueries.get( row )
+
+        if col == 0:
+
+            gquery['enabled'] = not gquery['enabled']
+            self._extender.gqueries.set( row, gquery )
+            self._extender.fireTableRowsUpdated( row, row )
+            return
     
         # Show the GQL Query for the selected row
-        gquery = self._extender.gqueries.get(row)
-        #analyzed_request = self._extender._helpers.analyzeRequest( gquery['query'] )
         self._extender._requestViewer.setMessage( self._extender._helpers.bytesToString( gquery['query'] ), True )
-        #self._extender._currentlyDisplayedItem = gquery._requestResponse
         
         JTable.changeSelection(self, row, col, toggle, extend)
