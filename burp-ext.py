@@ -432,6 +432,7 @@ import sys
 import json
 import re
 from thread import start_new_thread
+from copy import copy
 
 #DEBUG
 import pdb
@@ -452,34 +453,29 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         # set our extension name
         callbacks.setExtensionName( u"Auto GraphQL Scanner" )
 
-        self.gqueries = ArrayList()
-
         #DEBUG
         sys.stdout = callbacks.getStdout()
         sys.stderr = callbacks.getStderr()
         #END DEBUG
 
-        # TODO: Add UI element to get this URL from Burp user
-        self.gql_endpoint = u'http://localhost:5013/graphql'
-        url_parts = urlparse( self.gql_endpoint )
-        # TODO: Add UI element to get request headers from Burp user
-        self.headers = [
-            u'POST '+url_parts.path+' HTTP/1.1',
-            u'Host: '+url_parts.netloc,
-            u'sec-ch-ua: "Chromium";v="105", "Not)A;Brand";v="8"',
+        self.gqueries = ArrayList()
+        
+        self.gql_endpoint = u""
+
+        self.headers = []
+        self.headers_default = [
             u'Accept: application/json',
             u'Content-Type: application/json',
-            u'sec-ch-ua-mobile: ?0',
-            u'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.5195.102 Safari/537.36',
-            u'sec-ch-ua-platform: "macOS"',
-            u'Origin: '+self.gql_endpoint,
-            u'Sec-Fetch-Site: same-origin',
-            u'Sec-Fetch-Mode: cors',
-            u'Sec-Fetch-Dest: empty',
+            u'User-Agent: Auto GQL via Burp',
             u'Accept-Encoding: gzip, deflate',
             u'Accept-Language: en-US,en;q=0.9',
-            u'Cookie: language=en; welcomebanner_status=dismiss; cookieconsent_status=dismiss; continueCode=E3OzQenePWoj4zk293aRX8KbBNYEAo9GL5qO1ZDwp6JyVxgQMmrlv7npKLVy; env=graphiql:disable',
             u'Connection: close'
+        ]
+        self.headers_custom = []
+        self.headers_mandatory = [
+            u'POST @@path@@ HTTP/1.1',
+            u'Host: @@netloc@@',
+            u'Origin: @@url@@'
         ]
 
         self.addUI()
@@ -516,25 +512,36 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         opts_pane.add( label )
         
         placeholder_text = "http(s)://<host>/graphql"
-        txt_input_gql_endpoint = JTextField( self.gql_endpoint if self.gql_endpoint != "" else placeholder_text )
-        txt_input_gql_endpoint.setBounds( 160, 20, 230, 30 )
-        callbacks.customizeUiComponent( txt_input_gql_endpoint )
-        opts_pane.add( txt_input_gql_endpoint )
+        self.txt_input_gql_endpoint = JTextField( self.gql_endpoint if self.gql_endpoint != "" else placeholder_text )
+        self.txt_input_gql_endpoint.setBounds( 160, 20, 230, 30 )
+        callbacks.customizeUiComponent( self.txt_input_gql_endpoint )
+        opts_pane.add( self.txt_input_gql_endpoint )
         
         btn_fetch_queries = JButton( "Fetch Queries", actionPerformed=self._pull_queries )
         btn_fetch_queries.setBounds( 10, 70, 150, 30 )
         callbacks.customizeUiComponent( btn_fetch_queries )
         opts_pane.add( btn_fetch_queries )
         
+        label = JLabel("Custom Request Headers:")
+        label.setBounds( 10, 110, 150, 30 )
+        opts_pane.add( label )
+        
+        self.txt_input_headers = JTextArea( self.get_headers_text(), 5, 30 )
+        self.txt_input_headers.setWrapStyleWord(True)
+        self.txt_input_headers.setLineWrap(True)
+        scroll_txt_input_headers = JScrollPane( self.txt_input_headers )
+        scroll_txt_input_headers.setVerticalScrollBarPolicy( JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED )
+        scroll_txt_input_headers.setBounds( 10, 150, 470, 150 )
+        callbacks.customizeUiComponent( self.txt_input_headers )
+        callbacks.customizeUiComponent( scroll_txt_input_headers )
+        opts_pane.add( scroll_txt_input_headers )
+        
+        btn_fetch_queries = JButton( "Run Scan", actionPerformed=self._scan_queries )
+        btn_fetch_queries.setBounds( 10, 320, 150, 30 )
+        callbacks.customizeUiComponent( btn_fetch_queries )
+        opts_pane.add( btn_fetch_queries )
+        
         self._splitpane_main.setRightComponent( opts_pane )
-        """
-        self.txt_input_gql_endpoint = JTextArea("http(s)://<host>/graphql", 5)
-        self._splitpane_top.add( self.txt_input_gql_endpoint )
-        self.headerTextInput = JTextArea("Extra headers", 5, 30)
-        self._splitpane_top.add( self.headerTextInput )
-        scroll_pane2 = JScrollPane( gqueries_table )
-        self._splitpane_top.setRightComponent( scroll_pane2 )
-        """
 
         # Request viewer - Bottom-Left
         tabs = JTabbedPane()
@@ -551,10 +558,52 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         
         # add the custom tab to Burp's UI
         callbacks.addSuiteTab( self )
-    
+
+
+    def get_headers_text( self ):
+
+        if len( self.headers_custom ) == 0:
+            self.headers_custom = copy( self.headers_default )
+
+        return "\r\n".join( self.headers_custom )
+
+
+    def draw_headers_text( self ):
+        
+        self.txt_input_headers.setText( self.get_headers_text() )
+        
+
+    def set_headers( self ):
+
+        headers_custom_text = self.txt_input_headers.getText()
+        self.headers_custom = re.split( r'\r?\n', headers_custom_text )
+        
+        re_token = r'@@([a-z]+)@@'
+        url_parts = urlparse( self.gql_endpoint )
+        replacements = {
+            "path": url_parts.path,
+            "netloc": url_parts.netloc,
+            "url": self.gql_endpoint
+        }
+
+        replaced_headers = []
+        for hdr in self.headers_mandatory:
+            
+            match = re.search( re_token, hdr )
+            hdr = re.sub( re_token, replacements[ match.group(1) ], hdr )
+
+            replaced_headers.append( hdr )
+
+        self.headers = replaced_headers + self.headers_custom
+
 
     def _pull_queries( self, event ):
 
+        # TODO: (1) Validate URL
+        #       (2) Provide visual feedback that introspection is in progress
+        self.gql_endpoint = self.txt_input_gql_endpoint.getText()
+        self.set_headers()
+        self.draw_headers_text()
         start_new_thread( self.pull_queries, (event,) )
     
     def pull_queries( self, event ):
@@ -633,6 +682,13 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
     # Custom Methods
     #
 
+    def _scan_queries( self ):
+
+        # TODO: (1) Gray out button with info tooltip saying to fetch queries first
+        #       (2) Provide feedback that the scan has started
+        if self.gqueries.size() > 0:
+            start_new_thread( self.scan_queries, (1,) )
+
     def scan_queries( self ):
 
         url_parts = urlparse( self.gql_endpoint )
@@ -676,9 +732,9 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
             )
         
         gql_res = intros_res.getResponse()
-        gql_res_info = self._helpers.analyzeResponse(gql_res)
+        gql_res_info = self._helpers.analyzeResponse( gql_res )
         body_offset = gql_res_info.getBodyOffset()
-        introspection_result = self._helpers.bytesToString(gql_res)[body_offset:]
+        introspection_result = self._helpers.bytesToString( gql_res )[body_offset:]
 
         return introspection_result
 
@@ -686,6 +742,11 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
     def introspection_to_queries( self, introspection_result ):
 
         queries = generate( json.loads( introspection_result ) )
+
+        row_count = self.getRowCount()
+        if row_count > 0:
+            self.fireTableRowsDeleted( 0, row_count - 1 )
+            self.gqueries.clear()
 
         for qtype_nm, qtype in queries.items():
             for qname,query in qtype.items():
