@@ -26,6 +26,7 @@
    - Ensure that "Intercept" is turned **off** on the proxy, because the query is run through the proxy so that you can keep a record of it in the logger.
 5. Use the checkboxes to select the queries to include in the Active Scan.
    - The extension will automitcally preselect items that have insertion/injection points for the Active Scanner to add payloads to.
+   - For the first run, I recommend deselecting any Mutations that will delete data. The scanner is not smart enough to sequence requests with creation first and deletion second, so it might try to run deletion requests multiple times consecutively. You'll get false negatives on some payloads because there wasn't actually any data in the API to try and delete after the first deletion request.
 6. Click the **Run Scan** button to begin the Active Scan.
 7. View the progress by going to the Dashboard tab in Burp and expanding the "Extension driven active audit"
 
