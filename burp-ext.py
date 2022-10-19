@@ -754,7 +754,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
             #callbacks.sendToIntruder( # Used to debug Insertion Points visually
             self._callbacks.doActiveScan(
                 url_parts.hostname,
-                url_parts.port,
+                self.web_port( self.gql_endpoint ),
                 url_parts.scheme == 'https',
                 gquery['query'],
                 gquery['insertion_points']
@@ -773,7 +773,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
         http_service = self._helpers.buildHttpService(
             url_parts.hostname,
-            url_parts.port,
+            self.web_port( self.gql_endpoint ),
             url_parts.scheme
         )
         
@@ -874,6 +874,15 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
                     base_request,
                     prefix_pad + re_match.start(),
                     prefix_pad + re_match.end() )
+
+    def web_port( self, url ):
+
+        url_parts = urlparse( url )
+
+        if url_parts.port:
+            return url_parts.port
+
+        return 443 if url_parts.scheme.lower() == 'https' else 80
 
 #
 # extend JTable to handle cell selection
