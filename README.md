@@ -7,7 +7,7 @@
 2. Download Jython Standalone: https://www.jython.org/download.html
 3. Open Burp > Extender > Options > Python Environment
 4. Select the Jython jar
-## Installation Steps
+### Installation Steps
 4. Open Burp > Extender > Extensions > Add
 5. Extension Type: Python
 6. Select file: burp-ext.py
