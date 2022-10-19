@@ -1,5 +1,7 @@
 .DS_Store
 .vscode
+.jython_cache
+.python-version
 burp/
 dist/
 build/
