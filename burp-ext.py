@@ -535,26 +535,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         self.txt_input_gql_endpoint.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
         callbacks.customizeUiComponent( self.txt_input_gql_endpoint )
         opts_pane.add( self.txt_input_gql_endpoint )
-        
-        btn_fetch_queries = JButton( "Fetch Queries", actionPerformed=self._pull_queries )
-        y = opts_inner_y + 10
-        h = 30
-        opts_inner_y = y+h
-        btn_fetch_queries.setBounds( 10, y, 150, h )
-        callbacks.customizeUiComponent( btn_fetch_queries )
-        opts_pane.add( btn_fetch_queries )
 
-        label = JLabel("2.")
-        y = opts_inner_y + 10
-        h = 30
-        opts_inner_y = y+h
-        label.setBounds( 10, y, 30, h )
-        opts_pane.add( label )
-        
-        hbar = JSeparator()
-        hbar.setBounds( 40, y+h/2, 450, h )
-        opts_pane.add( hbar )
-        
         label = JLabel("Custom Request Headers:")
         y = opts_inner_y + 10
         h = 30
@@ -574,6 +555,25 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         callbacks.customizeUiComponent( self.txt_input_headers )
         callbacks.customizeUiComponent( scroll_txt_input_headers )
         opts_pane.add( scroll_txt_input_headers )
+
+        label = JLabel("2.")
+        y = opts_inner_y + 10
+        h = 30
+        opts_inner_y = y+h
+        label.setBounds( 10, y, 30, h )
+        opts_pane.add( label )
+        
+        hbar = JSeparator()
+        hbar.setBounds( 40, y+h/2, 450, h )
+        opts_pane.add( hbar )
+
+        btn_fetch_queries = JButton( "Fetch Queries", actionPerformed=self._pull_queries )
+        y = opts_inner_y + 10
+        h = 30
+        opts_inner_y = y+h
+        btn_fetch_queries.setBounds( 10, y, 150, h )
+        callbacks.customizeUiComponent( btn_fetch_queries )
+        opts_pane.add( btn_fetch_queries )
 
         label = JLabel("3.")
         y = opts_inner_y + 10
