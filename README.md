@@ -46,3 +46,8 @@
 ## Acknowledgements
 1. The transformation on Introspection response, into requests comes from the wonderful **inQL** extension for Burp. For this reason I have included their Apache license. My plan is to eventually implement my own version of this. Not because it isn't awesome, or because I'm afraid of losing street cred, but because I have some specific needs that will eventually require me to rewrite it. Plus it's fun to do it yourself!
 2. Other Burp extensions were helpful references when trying to work out issues that have weak documentation. Some notable ones are **Autorize** and **Logger++**.
+
+## Credits
+Author: Jared Meit (baron)
+ - Email: j.meit@fwdsec.com
+ - Twitter: @jaredmeit
