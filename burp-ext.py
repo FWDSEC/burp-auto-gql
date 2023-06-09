@@ -462,6 +462,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         self.gqueries = ArrayList()
         
         self.gql_endpoint = u""
+        self.gql_schema = u""
 
         self.headers = []
         self.headers_default = [
@@ -531,10 +532,27 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         
         placeholder_text = "http(s)://<host>/graphql"
         self.txt_input_gql_endpoint = JTextField( self.gql_endpoint if self.gql_endpoint != "" else placeholder_text )
-        self.txt_input_gql_endpoint.setBounds( 160, y, 300, h )
+        self.txt_input_gql_endpoint.setBounds( 190, y, 300, h )
         self.txt_input_gql_endpoint.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
         callbacks.customizeUiComponent( self.txt_input_gql_endpoint )
         opts_pane.add( self.txt_input_gql_endpoint )
+
+        # Added Load schema.json option
+        label = JLabel("Load schema.json:")
+        y = opts_inner_y + 10
+        h = 30
+        opts_inner_y = y+h
+        label.setBounds( 10, y, 150, h )
+        opts_pane.add( label )
+
+        # Load schema.json text field
+        placeholder_schema_text = "Fetch introspection schema.json locally. Note: Make sure to also include the URL above."
+        self.txt_input_gql_schema_file = JTextField( self.gql_schema  if self.gql_schema != "" else placeholder_schema_text )
+        self.txt_input_gql_schema_file.setBounds( 190, y, 720, h )
+        self.txt_input_gql_schema_file.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
+        callbacks.customizeUiComponent( self.txt_input_gql_schema_file )
+        opts_pane.add( self.txt_input_gql_schema_file )
+
 
         label = JLabel("Custom Request Headers:")
         y = opts_inner_y + 10
@@ -567,8 +585,18 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         hbar.setBounds( 40, y+h/2, 450, h )
         opts_pane.add( hbar )
 
+
         btn_fetch_queries = JButton( "Fetch Queries", actionPerformed=self._pull_queries )
         y = opts_inner_y + 10
+        h = 30
+        opts_inner_y = y+h
+        btn_fetch_queries.setBounds( 10, y, 150, h )
+        callbacks.customizeUiComponent( btn_fetch_queries )
+        opts_pane.add( btn_fetch_queries )
+
+        # New Button
+        btn_fetch_queries = JButton( "Load Schema.json ", actionPerformed=self._pull_queries )
+        y = opts_inner_y + 30
         h = 30
         opts_inner_y = y+h
         btn_fetch_queries.setBounds( 10, y, 150, h )
@@ -793,8 +821,22 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
 
     def introspection_to_queries( self, introspection_result ):
+        # Load introspection result
+        introspection_data = None
+        # Try getting introspection results from URL, if fails attempt to read a local schema.json
+        try:
+            introspection_data = json.loads(introspection_result)
+        except ValueError:
+            print(u"Failed to read JSON from URL, trying to read from local file.")
+            try:
+                with open(self.txt_input_gql_schema_file.getText(), 'r') as file: 
+                    introspection_data = json.load(file)
+            except (IOError, ValueError):
+                print(u"Failed to read JSON from local file. Cannot proceed.")
+                return
 
-        queries = generate( json.loads( introspection_result ) )
+
+        queries = generate(introspection_data)
 
         row_count = self.getRowCount()
         if row_count > 0:
@@ -810,7 +852,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
                 # TODO: Move to UI
                 # if any(substring in query_s.lower() for substring in ['delete','remove','clear']):
                 #     continue
-                        
+                            
                 request_bytes = self._helpers.buildHttpMessage(
                     self.headers,
                     self._helpers.stringToBytes( query_s )
@@ -831,6 +873,9 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
                 self.fireTableRowsInserted(row, row)
 
         return self.gqueries
+        
+
+
 
 
     def getInsertionPoints( self, gql_req ):
