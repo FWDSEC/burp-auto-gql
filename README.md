@@ -2,7 +2,6 @@
 
 This repository is a fork of the original Burp Auto GQL tool created by Jared Meit. It includes an additional functionality to import a Schema file as an alternative option to Introspection.
 
-## New Functionality: Schema Import
 
 In this fork, we have added the ability to import a Schema file, providing an alternative option to Introspection. This enhancement allows for testing GraphQL APIs that may not expose introspection capabilities.
 
