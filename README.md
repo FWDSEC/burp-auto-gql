@@ -1,6 +1,6 @@
 # Forked: Auto GraphQL Scanner (aka Auto GQL)
 
-This repository is a fork of the original Burp Auto GQL (beta) tool created by Jared Meit. It includes an additional functionality to import the Introspection Schema file as an alternative option.
+This repository is a fork of the original Burp Auto GQL (beta) tool created by Jared Meit. It includes an additional functionality to import the Introspection schema file as an alternative option.
 
 ## Usage
 
