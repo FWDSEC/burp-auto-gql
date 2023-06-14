@@ -562,7 +562,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         callbacks.customizeUiComponent( self.txt_input_gql_endpoint )
         opts_pane.add( self.txt_input_gql_endpoint )
 
-        #  File Button
+        #  Load File Button
         btn_fetch_queries = JButton("Select file ...", actionPerformed=self.load_json_schema)
         y = opts_inner_y + 30
         h = 30
@@ -611,17 +611,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         hbar.setBounds( 40, y+h/2, 450, h )
         opts_pane.add( hbar )
 
-        '''
-        btn_fetch_queries = JButton( "Fetch Queries", actionPerformed=self._pull_queries )
-        y = opts_inner_y + 10
-        h = 30
-        opts_inner_y = y+h
-        btn_fetch_queries.setBounds( 10, y, 150, h )
-        callbacks.customizeUiComponent( btn_fetch_queries )
-        opts_pane.add( btn_fetch_queries )
-        '''
-
-        # New Button
+        # Fetch Introspection Button 
         btn_fetch_queries = JButton( "Fetch Introspection ", actionPerformed=self._pull_queries )
         y = opts_inner_y + 10
         h = 30
