@@ -5,6 +5,7 @@ from jarray import array
 
 from urlparse import urlparse
 
+
 ORDER = {
     u"scalar": 0,
     u"enum": 1,
@@ -423,10 +424,13 @@ def generate(argument, detect=True):
 
 from burp import IBurpExtender, ITab, IMessageEditorController
 from java.util import ArrayList
-from javax.swing import JTabbedPane, JSplitPane, JScrollPane, JFrame, JTable, JLabel, JTextField, JButton, JTextArea, JSeparator
+from javax.swing import JTabbedPane, JSplitPane, JScrollPane, JFrame, JTable, JLabel, JTextField, JButton, JTextArea, JSeparator, JFileChooser
+from javax.swing.filechooser import FileNameExtensionFilter
+from java.awt.event import ActionListener
 from javax.swing.table import AbstractTableModel, TableRowSorter
 from java.lang import Boolean, String, Integer
 from java.awt import Font
+from urlparse import urlparse
 #from java.awt.event import FocusListener
 from urlparse import urlparse
 import sys
@@ -462,6 +466,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         self.gqueries = ArrayList()
         
         self.gql_endpoint = u""
+        self.gql_schema = u""
 
         self.headers = []
         self.headers_default = [
@@ -482,6 +487,27 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         self.addUI()
 
         return
+
+
+    # add file button to the UI
+    class ButtonClickAction(ActionListener):
+        def __init__(self, extender):
+            self.extender = extender
+
+    def actionPerformed(self, event):
+        self.extender.load_json_schema()
+
+    def load_json_schema(self, event=None):
+        chooser = JFileChooser()
+        jsonFilter = FileNameExtensionFilter("JSON files", ["json"])
+        chooser.setFileFilter(jsonFilter)
+
+        returnValue = chooser.showOpenDialog(None)
+        if returnValue == JFileChooser.APPROVE_OPTION:
+            selectedFile = chooser.getSelectedFile()
+            file_path = selectedFile.getAbsolutePath()
+            print("Selected file: ", file_path)  
+            self.txt_input_gql_schema_file.setText(file_path)
 
 
     def addUI( self ):
@@ -531,10 +557,28 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         
         placeholder_text = "http(s)://<host>/graphql"
         self.txt_input_gql_endpoint = JTextField( self.gql_endpoint if self.gql_endpoint != "" else placeholder_text )
-        self.txt_input_gql_endpoint.setBounds( 160, y, 300, h )
+        self.txt_input_gql_endpoint.setBounds( 190, y, 300, h )
         self.txt_input_gql_endpoint.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
         callbacks.customizeUiComponent( self.txt_input_gql_endpoint )
         opts_pane.add( self.txt_input_gql_endpoint )
+
+        #  Load File Button
+        btn_fetch_queries = JButton("Select file ...", actionPerformed=self.load_json_schema)
+        y = opts_inner_y + 30
+        h = 30
+        opts_inner_y = y + h
+        btn_fetch_queries.setBounds(10, y, 150, h)
+        self._callbacks.customizeUiComponent(btn_fetch_queries)
+        opts_pane.add(btn_fetch_queries)
+
+        # File Text Field
+        placeholder_schema_text = "Optionally provide introspection schema.json. URL still needs to be provied."
+        self.txt_input_gql_schema_file = JTextField(self.gql_schema if self.gql_schema != "" else placeholder_schema_text)
+        self.txt_input_gql_schema_file.setBounds(190, y, 720, h)
+        self.txt_input_gql_schema_file.setFont(Font(Font.MONOSPACED, Font.PLAIN, 14))
+        callbacks.customizeUiComponent(self.txt_input_gql_schema_file)
+        opts_pane.add(self.txt_input_gql_schema_file)
+
 
         label = JLabel("Custom Request Headers:")
         y = opts_inner_y + 10
@@ -567,11 +611,12 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         hbar.setBounds( 40, y+h/2, 450, h )
         opts_pane.add( hbar )
 
-        btn_fetch_queries = JButton( "Fetch Queries", actionPerformed=self._pull_queries )
+        # Fetch Introspection Button 
+        btn_fetch_queries = JButton( "Fetch Introspection ", actionPerformed=self._pull_queries )
         y = opts_inner_y + 10
         h = 30
         opts_inner_y = y+h
-        btn_fetch_queries.setBounds( 10, y, 150, h )
+        btn_fetch_queries.setBounds( 10, y, 190, h )
         callbacks.customizeUiComponent( btn_fetch_queries )
         opts_pane.add( btn_fetch_queries )
 
@@ -660,8 +705,12 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         start_new_thread( self.pull_queries, (1,) )
     
     def pull_queries( self, not_used ):
-
-        self.introspection_to_queries( self.introspect() )
+        try:
+            self.introspection_to_queries( self.introspect() )
+        except Exception as e:
+            print("An unexpected error occurred: verify if you entered the correct GraphQL Endpoint URL")
+            print("Details:", e)
+            return
 
     
     #
@@ -761,40 +810,71 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
             )
 
 
-    def introspect( self ):
-        
-        introspection_query =  u"query IntrospectionQuery{__schema{queryType{name}mutationType{name}subscriptionType{name}types{...FullType}directives{name description locations args{...InputValue}}}}fragment FullType on __Type{kind name description fields(includeDeprecated:true){name description args{...InputValue}type{...TypeRef}isDeprecated deprecationReason}inputFields{...InputValue}interfaces{...TypeRef}enumValues(includeDeprecated:true){name description isDeprecated deprecationReason}possibleTypes{...TypeRef}}fragment InputValue on __InputValue{name description type{...TypeRef}defaultValue}fragment TypeRef on __Type{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name}}}}}}}}"
-        url_parts = urlparse( self.gql_endpoint )
-        
-        request_bytes = self._helpers.buildHttpMessage(
-            self.headers,
-            self._helpers.stringToBytes( '{"query":"'+introspection_query+'"}' )
-        )
+    def introspect(self):
+        try:
+            # Try to parse the URL
+            url_parts = urlparse(self.gql_endpoint) 
 
-        http_service = self._helpers.buildHttpService(
-            url_parts.hostname,
-            self.web_port( self.gql_endpoint ),
-            url_parts.scheme
-        )
-        
-        print( u"Sending Introspection Query" )
-        
-        intros_res = self._callbacks.makeHttpRequest(
-                http_service,
-                request_bytes
+            hostname = url_parts.hostname
+            scheme = url_parts.scheme
+            port = url_parts.port if url_parts.port else (443 if scheme == 'https' else 80)
+
+            # Check if the URL has valid protocol
+            if scheme not in ['http', 'https']:
+                raise ValueError("Invalid protocol in URL: {}".format(scheme))
+
+            introspection_query =  u"query IntrospectionQuery{__schema{queryType{name}mutationType{name}subscriptionType{name}types{...FullType}directives{name description locations args{...InputValue}}}}fragment FullType on __Type{kind name description fields(includeDeprecated:true){name description args{...InputValue}type{...TypeRef}isDeprecated deprecationReason}inputFields{...InputValue}interfaces{...TypeRef}enumValues(includeDeprecated:true){name description isDeprecated deprecationReason}possibleTypes{...TypeRef}}fragment InputValue on __InputValue{name description type{...TypeRef}defaultValue}fragment TypeRef on __Type{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name}}}}}}}}"
+
+            request_bytes = self._helpers.buildHttpMessage(
+                self.headers,
+                self._helpers.stringToBytes( '{"query":"' + introspection_query + '"}' )
             )
-        
-        gql_res = intros_res.getResponse()
-        gql_res_info = self._helpers.analyzeResponse( gql_res )
-        body_offset = gql_res_info.getBodyOffset()
-        introspection_result = self._helpers.bytesToString( gql_res )[body_offset:]
 
-        return introspection_result
+            http_service = self._helpers.buildHttpService(
+                hostname,
+                port,
+                scheme
+            )
+
+            print("Sending Introspection Query")
+
+            intros_res = self._callbacks.makeHttpRequest(
+                    http_service,
+                    request_bytes
+                )
+            
+            gql_res = intros_res.getResponse()
+            gql_res_info = self._helpers.analyzeResponse( gql_res )
+            body_offset = gql_res_info.getBodyOffset()
+            introspection_result = self._helpers.bytesToString( gql_res )[body_offset:]
+
+            return introspection_result
+
+        except ValueError as ve:
+            print("An error occurred during URL parsing: {}".format(ve))
+        except Exception as e:
+            print("An unexpected error occurred:")
+            print("Details:", e)
+            return
 
 
     def introspection_to_queries( self, introspection_result ):
+        # Load introspection result
+        introspection_data = None
+        # Try getting introspection results from URL, if fails attempt to read a local schema.json
+        try:
+            introspection_data = json.loads(introspection_result)
+        except ValueError:
+            print(u"Failed to read JSON from URL, trying to read from local file.")
+            try:
+                with open(self.txt_input_gql_schema_file.getText(), 'r') as file: 
+                    introspection_data = json.load(file)
+            except (IOError, ValueError):
+                print(u"Failed to read JSON from local file. Cannot proceed.")
+                return
 
-        queries = generate( json.loads( introspection_result ) )
+
+        queries = generate(introspection_data)
 
         row_count = self.getRowCount()
         if row_count > 0:
@@ -810,7 +890,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
                 # TODO: Move to UI
                 # if any(substring in query_s.lower() for substring in ['delete','remove','clear']):
                 #     continue
-                        
+                            
                 request_bytes = self._helpers.buildHttpMessage(
                     self.headers,
                     self._helpers.stringToBytes( query_s )
@@ -831,7 +911,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
                 self.fireTableRowsInserted(row, row)
 
         return self.gqueries
-
+        
 
     def getInsertionPoints( self, gql_req ):
  
