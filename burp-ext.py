@@ -499,13 +499,13 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
     def load_json_schema(self, event=None):
         chooser = JFileChooser()
-        jsonFilter = FileNameExtensionFilter("JSON files", ["json"])
-        chooser.setFileFilter(jsonFilter)
+        json_filter = FileNameExtensionFilter("JSON files", ["json","graphql"])
+        chooser.setFileFilter(json_filter)
 
-        returnValue = chooser.showOpenDialog(None)
-        if returnValue == JFileChooser.APPROVE_OPTION:
-            selectedFile = chooser.getSelectedFile()
-            file_path = selectedFile.getAbsolutePath()
+        dialog_selection = chooser.showOpenDialog(None)
+        if dialog_selection == JFileChooser.APPROVE_OPTION:
+            schema_file = chooser.getSelectedFile()
+            file_path = schema_file.getAbsolutePath()
             print("Selected file: ", file_path)  
             self.txt_input_gql_schema_file.setText(file_path)
 
@@ -555,29 +555,29 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         label.setBounds( 10, y, 150, h )
         opts_pane.add( label )
         
-        placeholder_text = "http(s)://<host>/graphql"
-        self.txt_input_gql_endpoint = JTextField( self.gql_endpoint if self.gql_endpoint != "" else placeholder_text )
+        self.placeholder_endpoint_text = "http(s)://<host>/graphql"
+        self.txt_input_gql_endpoint = JTextField( self.gql_endpoint if self.gql_endpoint != "" else self.placeholder_endpoint_text )
         self.txt_input_gql_endpoint.setBounds( 190, y, 300, h )
         self.txt_input_gql_endpoint.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
         callbacks.customizeUiComponent( self.txt_input_gql_endpoint )
         opts_pane.add( self.txt_input_gql_endpoint )
 
         #  Load File Button
-        btn_fetch_queries = JButton("Select file ...", actionPerformed=self.load_json_schema)
+        btn_select_schema_file = JButton( "Select file ...", actionPerformed=self.load_json_schema )
         y = opts_inner_y + 30
         h = 30
         opts_inner_y = y + h
-        btn_fetch_queries.setBounds(10, y, 150, h)
-        self._callbacks.customizeUiComponent(btn_fetch_queries)
-        opts_pane.add(btn_fetch_queries)
+        btn_select_schema_file.setBounds( 10, y, 150, h )
+        self._callbacks.customizeUiComponent( btn_select_schema_file )
+        opts_pane.add( btn_select_schema_file )
 
         # File Text Field
-        placeholder_schema_text = "Optionally provide introspection schema.json. URL still needs to be provied."
-        self.txt_input_gql_schema_file = JTextField(self.gql_schema if self.gql_schema != "" else placeholder_schema_text)
-        self.txt_input_gql_schema_file.setBounds(190, y, 720, h)
-        self.txt_input_gql_schema_file.setFont(Font(Font.MONOSPACED, Font.PLAIN, 14))
-        callbacks.customizeUiComponent(self.txt_input_gql_schema_file)
-        opts_pane.add(self.txt_input_gql_schema_file)
+        self.placeholder_schema_text = "Optionally provide introspection schema.json. URL still needs to be provied."
+        self.txt_input_gql_schema_file = JTextField( self.gql_schema if self.gql_schema != "" else self.placeholder_schema_text )
+        self.txt_input_gql_schema_file.setBounds( 190, y, 720, h )
+        self.txt_input_gql_schema_file.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
+        callbacks.customizeUiComponent( self.txt_input_gql_schema_file )
+        opts_pane.add( self.txt_input_gql_schema_file )
 
 
         label = JLabel("Custom Request Headers:")
@@ -634,7 +634,6 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         btn_fetch_queries = JButton( "Run Scan", actionPerformed=self._scan_queries )
         y = opts_inner_y + 10
         h = 30
-        opts_inner_y = y+h
         btn_fetch_queries.setBounds( 10, y, 150, h )
         callbacks.customizeUiComponent( btn_fetch_queries )
         opts_pane.add( btn_fetch_queries )
@@ -788,6 +787,12 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
         # TODO: (1) Gray out button with info tooltip saying to fetch queries first
         #       (2) Provide feedback that the scan has started
+
+        if self.gql_endpoint.strip() == '' or self.gql_endpoint == self.placeholder_endpoint_text:
+            err = u"URL is required for running the scan."
+            print( err )
+            return
+
         if self.gqueries.size() > 0:
             start_new_thread( self.scan_queries, (1,) )
 
@@ -811,13 +816,27 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
 
     def introspect(self):
+
+        schema_file_text = self.txt_input_gql_schema_file.getText()
+        if schema_file_text.strip() != '' and schema_file_text != self.placeholder_schema_text:
+            try:
+                with open( self.txt_input_gql_schema_file.getText(), 'r' ) as file:
+                    return file.read()
+            except ( IOError, ValueError ):
+                print( u"Failed to read schema from local file. Trying Introspection query." )
+            
+        if self.gql_endpoint.strip() == '' or self.gql_endpoint == self.placeholder_endpoint_text:
+            err = u"URL is required for fetching introspection."
+            print( err )
+            raise ValueError( err )
+        
         try:
             # Try to parse the URL
             url_parts = urlparse(self.gql_endpoint) 
 
             hostname = url_parts.hostname
             scheme = url_parts.scheme
-            port = url_parts.port if url_parts.port else (443 if scheme == 'https' else 80)
+            port = url_parts.port if url_parts.port else ( 443 if scheme == 'https' else 80 )
 
             # Check if the URL has valid protocol
             if scheme not in ['http', 'https']:
@@ -865,13 +884,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         try:
             introspection_data = json.loads(introspection_result)
         except ValueError:
-            print(u"Failed to read JSON from URL, trying to read from local file.")
-            try:
-                with open(self.txt_input_gql_schema_file.getText(), 'r') as file: 
-                    introspection_data = json.load(file)
-            except (IOError, ValueError):
-                print(u"Failed to read JSON from local file. Cannot proceed.")
-                return
+            print(u"Bad response from server. Check the URL if you're sure that the server has Introspection enabled. Otherwise load the schema file.")
 
 
         queries = generate(introspection_data)
