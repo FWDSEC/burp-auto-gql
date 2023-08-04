@@ -428,11 +428,11 @@ def generate(argument, detect=True):
 
 from burp import IBurpExtender, ITab, IMessageEditorController
 from java.util import ArrayList
-from javax.swing import JPanel, JTabbedPane, JSplitPane, JScrollPane, JTable, JLabel, JTextField, JButton, JTextArea, JSeparator, JFileChooser, JComboBox
+from javax.swing import JPanel, JTabbedPane, JSplitPane, JScrollPane, JTable, JLabel, JTextField, JButton, JTextArea, JSeparator, JFileChooser, JComboBox, Timer
 from javax.swing.filechooser import FileNameExtensionFilter
 from javax.swing.event import DocumentListener
 from java.awt import Color, GridBagLayout, GridBagConstraints, Insets, BorderLayout
-from javax.swing.border import EmptyBorder
+from javax.swing.border import EmptyBorder, LineBorder
 from javax.swing.table import AbstractTableModel
 from java.lang import Boolean, String, Integer
 from java.awt import Font, Dimension
@@ -506,7 +506,6 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         if dialog_selection == JFileChooser.APPROVE_OPTION:
             schema_file = chooser.getSelectedFile()
             file_path = schema_file.getAbsolutePath()
-            print("Selected file: ", file_path)  
             self.txt_input_gql_schema_file.setText(file_path)
 
     
@@ -541,7 +540,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
 
     def locked_prop_remove_and_reset_default( self, event, index ):
-        print(event)
+        
         btn_del = event.getSource()
         parent_panel = btn_del.getParent()
         prop_el, val_el = self.locked_req_props_elements[ index ]
@@ -615,10 +614,19 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         
         self.placeholder_endpoint_text = "http(s)://<host>/graphql"
         self.txt_input_gql_endpoint = JTextField( self.gql_endpoint if self.gql_endpoint != "" else self.placeholder_endpoint_text )
-        self.txt_input_gql_endpoint.setBounds( 230, y, 300, h )
+        x = 230
+        w = 400
+        self.txt_input_gql_endpoint.setBounds( 1, 1, w, h )
         self.txt_input_gql_endpoint.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
         callbacks.customizeUiComponent( self.txt_input_gql_endpoint )
-        opts_pane.add( self.txt_input_gql_endpoint )
+        label_wrap = JPanel()
+        label_wrap.setLayout( None )
+        label_wrap.setBorder( None )
+        label_wrap.setBounds( x, y, w+2, h+2 )
+        label_wrap.add( self.txt_input_gql_endpoint )
+        input_listener = TextFieldValidationListener( self.txt_input_gql_endpoint, uri_validator, self.placeholder_endpoint_text )
+        self.txt_input_gql_endpoint.getDocument().addDocumentListener( input_listener )
+        opts_pane.add( label_wrap )
 
         # Row 2 (GraphQL Schema File)
         ##  Load File Button
@@ -633,7 +641,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         ## File Text Field
         self.placeholder_schema_text = "Optionally provide introspection schema.json. URL still needs to be provied."
         self.txt_input_gql_schema_file = JTextField( self.gql_schema if self.gql_schema != "" else self.placeholder_schema_text )
-        self.txt_input_gql_schema_file.setBounds( 230, y, 720, h )
+        self.txt_input_gql_schema_file.setBounds( 230, y, 400, h )
         self.txt_input_gql_schema_file.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
         callbacks.customizeUiComponent( self.txt_input_gql_schema_file )
         opts_pane.add( self.txt_input_gql_schema_file )
@@ -831,11 +839,10 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
     def _pull_queries( self, event ):
 
-        # TODO: (1) Show error on invalid URL
-        #       (2) Provide visual feedback that introspection is in progress
+        # TODO: (1) Provide visual feedback that introspection is in progress
         gql_endpoint_input = self.txt_input_gql_endpoint.getText()
 
-        if not self.uri_validator( gql_endpoint_input ):
+        if not uri_validator( gql_endpoint_input ):
             # Show error
             return
         
@@ -937,8 +944,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
     def _scan_queries( self, event ):
 
-        # TODO: (1) Gray out button with info tooltip saying to fetch queries first
-        #       (2) Provide feedback that the scan has started
+        # TODO: (1) Provide feedback that the scan has started
 
         if self.gql_endpoint.strip() == '' or self.gql_endpoint == self.placeholder_endpoint_text:
             err = u"URL is required for running the scan."
@@ -967,7 +973,9 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
                 
                 if lp_qname == gquery['name']:
                     gquery_s = self.set_gquery_req_param( gquery_s, lp_qparam, val_el.getText() )
-                    gquery = self.create_gquery( gquery_s, gquery['type'], gquery['name'] )
+                    
+            # Set custom headers, and reset insertion points if locked req props are defined
+            gquery = self.create_gquery( gquery_s, gquery['type'], gquery['name'] )
 
             #callbacks.sendToIntruder( # Used to debug Insertion Points visually
             scan_queue_item = self._callbacks.doActiveScan(
@@ -979,7 +987,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
             )
 
             status = scan_queue_item.getStatus()
-            print(status)
+            # TODO: Display scan status
 
 
     def set_gquery_req_param( self, gquery_json, lp_qparam, lp_value ):
@@ -1182,13 +1190,14 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
         return 443 if url_parts.scheme.lower() == 'https' else 80
     
+# Global Helpers
 
-    def uri_validator( self, urlstr ):
-        try:
-            result = urlparse( urlstr )
-            return all([result.scheme, result.netloc])
-        except:
-            return False
+def uri_validator( urlstr ):
+    try:
+        result = urlparse( urlstr )
+        return all([result.scheme, result.netloc])
+    except:
+        return False
 
 #
 # extend JTable to handle cell selection
@@ -1217,26 +1226,45 @@ class QueriesTable( JTable ):
 
 #
 # Extend DocumentListner for txt_input_locked_property_value "onchange"
-# ToDO: Repurpose for validation of URL and file inputs
 #
-class LockedPropValueListener( DocumentListener ):
+class TextFieldValidationListener( DocumentListener ):
     
-    def __init__( self, prop_element, value_element, locked_req_props ):
-        self.prop_element = prop_element
-        self.value_element = value_element
-        self.locked_req_props = locked_req_props
+    def __init__( self, text_component, validator_fn, placeholder_text='' ):
+        self.text_component = text_component
+        self.placeholder_text = placeholder_text
+        self.validator_fn = validator_fn
+        self.url_pnl = text_component.getParent()
+        self.timer = Timer(10, self._fade_border)  # Timer with 10ms delay
+        self.timer.setRepeats(False)
+        self.current_alpha = 0  # Start with an invisible border
 
     def insertUpdate( self, event ):
-        print('inserted')
         self._text_updated( event )
 
     def removeUpdate( self, event ):
-        print('removed')
         self._text_updated( event )
 
     def _text_updated( self, event ):
-        value = self.value_element.getText()
-        prop = self.prop_element.getSelectedItem()
-        self.locked_req_props[ prop ] = value
-        print(prop+" -> "+value)
-        print( self.locked_req_props )
+        url = self.text_component.getText()
+        self.target_color = Color.green if self.validator_fn( url ) else Color.red
+        self.url_pnl.setBorder( LineBorder( self.target_color, 1 ) )
+        self.current_alpha = 255
+        self.timer.restart()  # Restart the timer on every update
+
+    def _fade_border(self, event):
+        alpha_step = 1  # Adjust this value to control the speed of the fade
+        
+        self.current_alpha -= alpha_step
+        if self.current_alpha < 0:
+            self.current_alpha = 0
+        
+        # Set the alpha transparency on the border color
+        border_color = Color( self.target_color.getRed(), self.target_color.getGreen(), self.target_color.getBlue(), self.current_alpha )
+
+        self.url_pnl.setBorder( LineBorder( border_color, 1 ) )
+
+        if self.current_alpha > 0:
+            self.timer.restart()  # Continue the fade effect
+        else:
+            self.url_pnl.setBorder(None)  # Remove the border completely when alpha becomes 0
+
