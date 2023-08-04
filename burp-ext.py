@@ -170,6 +170,14 @@ def dict_to_qbody(d, prefix=u''):
         return args
 
 
+default_req_param_vals = {
+    u'String': u'"$string$"',
+    u'Int': 1334,
+    u'Boolean': u'true',
+    u'Float': 0.1334,
+    u'ID': 14
+}
+
 def preplace(schema, reverse_lookup, t):
     u"""
     Replaces basic types and enums with default values.
@@ -184,17 +192,13 @@ def preplace(schema, reverse_lookup, t):
         type that you need to generate the AST for, since it is recursive it may be anything inside the graph
 
     """
-    if t == u'String':
-        return u'@code*@'
-    elif t == u'Int':
-        return 1334
-    elif t == u'Boolean':
-        return u'true'
-    elif t == u'Float':
-        return 0.1334
-    elif t == u'ID':
-        return 14
-    elif reverse_lookup[t] == u'enum':
+
+    if t in default_req_param_vals:
+        type_default = default_req_param_vals[ t ]
+        if type(type_default) == unicode:
+            type_default = type_default.replace( '"', '@' )
+        return type_default
+    if reverse_lookup[t] == u'enum':
         return list(schema[u'enum'][t].keys())[0]
     elif reverse_lookup[t] == u'scalar':
         # scalar may be any type, so the AST can be anything as well
@@ -424,23 +428,24 @@ def generate(argument, detect=True):
 
 from burp import IBurpExtender, ITab, IMessageEditorController
 from java.util import ArrayList
-from javax.swing import JTabbedPane, JSplitPane, JScrollPane, JFrame, JTable, JLabel, JTextField, JButton, JTextArea, JSeparator, JFileChooser
+from javax.swing import JPanel, JTabbedPane, JSplitPane, JScrollPane, JTable, JLabel, JTextField, JButton, JTextArea, JSeparator, JFileChooser, JComboBox
 from javax.swing.filechooser import FileNameExtensionFilter
-from java.awt.event import ActionListener
-from javax.swing.table import AbstractTableModel, TableRowSorter
+from javax.swing.event import DocumentListener
+from java.awt import Color, GridBagLayout, GridBagConstraints, Insets, BorderLayout
+from javax.swing.border import EmptyBorder
+from javax.swing.table import AbstractTableModel
 from java.lang import Boolean, String, Integer
-from java.awt import Font
+from java.awt import Font, Dimension
 from urlparse import urlparse
-#from java.awt.event import FocusListener
-from urlparse import urlparse
-import sys
 import json
 import re
 from thread import start_new_thread
 from copy import copy
+from uuid import uuid4
+import sys
 
 #DEBUG
-import pdb
+# import pdb
 #END DEBUG
 
 class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorController ):
@@ -459,8 +464,8 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         callbacks.setExtensionName( u"Auto GraphQL Scanner" )
 
         #DEBUG
-        sys.stdout = callbacks.getStdout()
-        sys.stderr = callbacks.getStderr()
+        # sys.stdout = callbacks.getStdout()
+        # sys.stderr = callbacks.getStderr()
         #END DEBUG
 
         self.gqueries = ArrayList()
@@ -470,6 +475,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
 
         self.headers = []
         self.headers_default = [
+            u'Origin: @@url@@',
             u'Accept: application/json',
             u'Content-Type: application/json',
             u'User-Agent: Auto GQL via Burp',
@@ -480,24 +486,18 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         self.headers_custom = []
         self.headers_mandatory = [
             u'POST @@path@@ HTTP/1.1',
-            u'Host: @@netloc@@',
-            u'Origin: @@url@@'
+            u'Host: @@netloc@@'
         ]
+        
+        self.in_prop_names = []
 
-        self.addUI()
+        self.add_ui()
 
         return
 
 
     # add file button to the UI
-    class ButtonClickAction(ActionListener):
-        def __init__(self, extender):
-            self.extender = extender
-
-    def actionPerformed(self, event):
-        self.extender.load_json_schema()
-
-    def load_json_schema(self, event=None):
+    def load_json_schema_file(self, event=None):
         chooser = JFileChooser()
         json_filter = FileNameExtensionFilter("JSON files", ["json","graphql"])
         chooser.setFileFilter(json_filter)
@@ -509,97 +509,174 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
             print("Selected file: ", file_path)  
             self.txt_input_gql_schema_file.setText(file_path)
 
+    
+    def create_locked_req_props_ui( self, event ):
 
-    def addUI( self ):
+        callbacks = self._callbacks
+
+        self.grid_constraints.gridy = len( self.locked_req_props_elements.keys() ) + 1
+
+        self.grid_constraints.gridx = 0
+        opts_input_locked_property = JComboBox( self.in_prop_names )
+        opts_input_locked_property.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
+        callbacks.customizeUiComponent( opts_input_locked_property )
+        self.locked_prop_tabs_panel.add( opts_input_locked_property, self.grid_constraints )
+
+        self.grid_constraints.gridx = 1
+        txt_input_locked_property_value = JTextField( 50 )
+        txt_input_locked_property_value.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
+        callbacks.customizeUiComponent( txt_input_locked_property_value )
+        self.locked_prop_tabs_panel.add( txt_input_locked_property_value, self.grid_constraints )
+
+        self.grid_constraints.gridx = 2
+        rnd_index = uuid4().hex
+        btn_add_locked_prop_fields = JButton( 'Remove', actionPerformed=lambda event: self.locked_prop_remove_and_reset_default( event, rnd_index ) )
+        callbacks.customizeUiComponent( btn_add_locked_prop_fields )
+        self.locked_prop_tabs_panel.add( btn_add_locked_prop_fields, self.grid_constraints )
+
+        # Required for dynamically adding components without explicitly repainting
+        self.locked_prop_tabs_panel.revalidate()
+
+        self.locked_req_props_elements[ rnd_index ] = ( opts_input_locked_property, txt_input_locked_property_value )
+
+
+    def locked_prop_remove_and_reset_default( self, event, index ):
+        print(event)
+        btn_del = event.getSource()
+        parent_panel = btn_del.getParent()
+        prop_el, val_el = self.locked_req_props_elements[ index ]
+
+        parent_panel.remove(btn_del)
+        parent_panel.remove(prop_el)
+        parent_panel.remove(val_el)
+
+        parent_panel.revalidate()
+
+        del self.locked_req_props_elements[ index ]
+
+    
+    def add_ui( self ):
 
         print( u"Loading UI..." )
 
         callbacks = self._callbacks
 
-        # Main split pane
-        self._splitpane_main = JSplitPane( JSplitPane.HORIZONTAL_SPLIT )
 
-        # Top split pane with table and options
+        # Queries Table / Requests (Left half of main)
         self._splitpane_left = JSplitPane( JSplitPane.VERTICAL_SPLIT )
-        self._splitpane_main.setLeftComponent( self._splitpane_left )
+        # Input / Advanced Options (Right half of main)
+        self._right_panel = JPanel()
+        self._right_panel.setLayout( BorderLayout() )
+        # Main split pane
+        self._splitpane_main = JSplitPane( JSplitPane.HORIZONTAL_SPLIT, self._splitpane_left, self._right_panel )
         
-        # Queries Table - Top-Left
-        gqueries_table = Table(self)
-        # TODO: Disable until I fix the changeSelection to work with sorting
+        # Queries Table - Left-Top
+        gqueries_table = QueriesTable(self)
+        # TODO: Disabled sorting until I fix the changeSelection to work with sorting
         #gqueries_table.setRowSorter( TableRowSorter(self) )
         scroll_pane = JScrollPane( gqueries_table )
         self._splitpane_left.setLeftComponent( scroll_pane )
 
-        # Options - Top-Right
-        frame = JFrame()
-        opts_pane = frame.getContentPane()
+        # Request viewer - Left-Bottom
+        tabs = JTabbedPane()
+        editable = False
+        self._requestViewer = callbacks.createMessageEditor( self, editable )
+        tabs.addTab( "Request", self._requestViewer.getComponent() )
+        self._splitpane_left.setRightComponent( tabs )
+
+        # Options - Right-Top
+        opts_tabs = JTabbedPane()
+        opts_pane = JPanel()
         opts_pane.setLayout( None )
 
+        # TAB - "Start"
+        # Row 1 (GraphQL Endpoint URL)
+        ## Number and Separator
         opts_inner_y = 0
+        y = opts_inner_y + 30
+        h = 30
+        
 
         label = JLabel("1.")
-        y = 10
-        h = 30
-        opts_inner_y = y+h
         label.setBounds( 10, y, 30, h )
         opts_pane.add( label )
         
         hbar = JSeparator()
         hbar.setBounds( 40, y+h/2, 450, h )
         opts_pane.add( hbar )
+        opts_inner_y = y + h
         
+        ## Label and Input
+        y = opts_inner_y + 30
+        opts_inner_y = y + h
         label = JLabel("GraphQL Endpoint URL:")
-        y = opts_inner_y + 10
-        h = 30
-        opts_inner_y = y+h
-        label.setBounds( 10, y, 150, h )
+        label.setBounds( 40, y, 150, h )
         opts_pane.add( label )
         
         self.placeholder_endpoint_text = "http(s)://<host>/graphql"
         self.txt_input_gql_endpoint = JTextField( self.gql_endpoint if self.gql_endpoint != "" else self.placeholder_endpoint_text )
-        self.txt_input_gql_endpoint.setBounds( 190, y, 300, h )
+        self.txt_input_gql_endpoint.setBounds( 230, y, 300, h )
         self.txt_input_gql_endpoint.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
         callbacks.customizeUiComponent( self.txt_input_gql_endpoint )
         opts_pane.add( self.txt_input_gql_endpoint )
 
-        #  Load File Button
-        btn_select_schema_file = JButton( "Select file ...", actionPerformed=self.load_json_schema )
+        # Row 2 (GraphQL Schema File)
+        ##  Load File Button
+        btn_select_schema_file = JButton( "Select file ...", actionPerformed=self.load_json_schema_file )
         y = opts_inner_y + 30
         h = 30
         opts_inner_y = y + h
-        btn_select_schema_file.setBounds( 10, y, 150, h )
+        btn_select_schema_file.setBounds( 40, y, 150, h )
         self._callbacks.customizeUiComponent( btn_select_schema_file )
         opts_pane.add( btn_select_schema_file )
 
-        # File Text Field
+        ## File Text Field
         self.placeholder_schema_text = "Optionally provide introspection schema.json. URL still needs to be provied."
         self.txt_input_gql_schema_file = JTextField( self.gql_schema if self.gql_schema != "" else self.placeholder_schema_text )
-        self.txt_input_gql_schema_file.setBounds( 190, y, 720, h )
+        self.txt_input_gql_schema_file.setBounds( 230, y, 720, h )
         self.txt_input_gql_schema_file.setFont( Font( Font.MONOSPACED, Font.PLAIN, 14 ) )
         callbacks.customizeUiComponent( self.txt_input_gql_schema_file )
         opts_pane.add( self.txt_input_gql_schema_file )
 
-
+        # Row 3 (Custom Request Headers)
+        ## Label, input, and help text
         label = JLabel("Custom Request Headers:")
         y = opts_inner_y + 10
         h = 30
         opts_inner_y = y+h
-        label.setBounds( 10, y, 150, h )
+        label.setBounds( 40, y, 150, h )
         opts_pane.add( label )
         
         self.txt_input_headers = JTextArea( self.get_headers_text(), 5, 30 )
-        self.txt_input_headers.setWrapStyleWord(True)
-        self.txt_input_headers.setLineWrap(True)
+        self.txt_input_headers.setWrapStyleWord( True )
+        self.txt_input_headers.setLineWrap( True )
         scroll_txt_input_headers = JScrollPane( self.txt_input_headers )
         scroll_txt_input_headers.setVerticalScrollBarPolicy( JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED )
         y = opts_inner_y + 10
         h = 150
         opts_inner_y = y+h
-        scroll_txt_input_headers.setBounds( 10, y, 470, h )
+        scroll_txt_input_headers.setBounds( 40, y, 470, h )
         callbacks.customizeUiComponent( self.txt_input_headers )
         callbacks.customizeUiComponent( scroll_txt_input_headers )
         opts_pane.add( scroll_txt_input_headers )
+        
+        label = JLabel("<html>\
+                            <p>Header Variables:</p>\
+                            <ul>\
+                                <li><b>@@url@@</b> => The target GraphQL Endpoint URL.</li>\
+                                <li><b>@@netloc@@</b> => The network location of the GraphQL Endpoint URL. Everything between \"http(s)://\" and the path.</li>\
+                                <li><b>@@path@@</b> => The path portion of the GraphQL Endpoint URL.</li>\
+                            </ul>\
+                        </html>")
+        label.putClientProperty( "html.disable", None )
+        y = opts_inner_y + 10
+        h = 100
+        opts_inner_y = y+h
+        label.setBounds( 40, y, 470, h )
+        opts_pane.add( label )
 
+        # Row 4 (Fetch Introspection Button)
+        ## Number and Line
         label = JLabel("2.")
         y = opts_inner_y + 10
         h = 30
@@ -611,15 +688,17 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         hbar.setBounds( 40, y+h/2, 450, h )
         opts_pane.add( hbar )
 
-        # Fetch Introspection Button 
-        btn_fetch_queries = JButton( "Fetch Introspection ", actionPerformed=self._pull_queries )
+        ## Fetch Introspection Button 
+        btn_fetch_queries = JButton( "Get All Possible Queries", actionPerformed=self._pull_queries )
         y = opts_inner_y + 10
         h = 30
         opts_inner_y = y+h
-        btn_fetch_queries.setBounds( 10, y, 190, h )
+        btn_fetch_queries.setBounds( 40, y, 190, h )
         callbacks.customizeUiComponent( btn_fetch_queries )
         opts_pane.add( btn_fetch_queries )
 
+        # Row 5 (Run Scan Button)
+        ## Number and Line
         label = JLabel("3.")
         y = opts_inner_y + 10
         h = 30
@@ -631,24 +710,64 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         hbar.setBounds( 40, y+h/2, 450, h )
         opts_pane.add( hbar )
         
-        btn_fetch_queries = JButton( "Run Scan", actionPerformed=self._scan_queries )
+        ## Run Scan button
+        btn_fetch_queries = JButton( "Send to Active Scanner", actionPerformed=self._scan_queries )
         y = opts_inner_y + 10
         h = 30
-        btn_fetch_queries.setBounds( 10, y, 150, h )
+        opts_inner_y = y+h
+        btn_fetch_queries.setBounds( 40, y, 150, h )
         callbacks.customizeUiComponent( btn_fetch_queries )
         opts_pane.add( btn_fetch_queries )
-        
-        self._splitpane_main.setRightComponent( opts_pane )
 
-        # Request viewer - Bottom-Left
-        tabs = JTabbedPane()
-        self._requestViewer = callbacks.createMessageEditor( self, False )
-        tabs.addTab( "Request", self._requestViewer.getComponent() )
-        self._splitpane_left.setRightComponent( tabs )
+        # TAB - "Locked Properties"
+        self.locked_prop_tabs_panel = JPanel()
+        self.locked_prop_tabs_panel.setLayout( GridBagLayout() )
+        self.grid_constraints = GridBagConstraints()
+        self.grid_constraints.fill = GridBagConstraints.HORIZONTAL
+        self.grid_constraints.insets = Insets(5, 5, 5, 5)
+        self.grid_constraints.anchor = GridBagConstraints.NORTHWEST
+        self.locked_prop_tabs_panel.setMaximumSize( Dimension( 700, 200 ) )
+
+        self.grid_constraints.gridy = 0
+        
+        self.grid_constraints.gridx = 0
+        label = JLabel("Query Property Name")
+        self.locked_prop_tabs_panel.add( label, self.grid_constraints )
+
+        self.grid_constraints.gridx = 1
+        label = JLabel("Locked Value")
+        self.locked_prop_tabs_panel.add( label, self.grid_constraints )
+
+        self.grid_constraints.gridx = 2
+        btn_add_locked_prop_fields = JButton( 'Add New', actionPerformed=self.create_locked_req_props_ui )
+        callbacks.customizeUiComponent( btn_add_locked_prop_fields )
+        self.locked_prop_tabs_panel.add( btn_add_locked_prop_fields, self.grid_constraints )
+
+        self.locked_req_props_elements = {}
+        self.locked_req_props = {}
+
+        container_pnl = JPanel()
+        container_pnl.setLayout( GridBagLayout() )
+        container_pnl.setBorder( EmptyBorder(20, 20, 20, 20) )
+        container_constraints = GridBagConstraints()
+        container_constraints.gridx = 0
+        container_constraints.gridy = 0
+        container_constraints.weightx = 1
+        container_constraints.weighty = 1
+        container_constraints.anchor = GridBagConstraints.NORTHWEST
+        container_pnl.add( self.locked_prop_tabs_panel, container_constraints )
+        scroll_locked_prop_tabs_panel = JScrollPane( container_pnl )
+        scroll_locked_prop_tabs_panel.setVerticalScrollBarPolicy( JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED )
+        callbacks.customizeUiComponent( scroll_locked_prop_tabs_panel )
+        
+        opts_tabs.addTab( "Start", opts_pane )
+        opts_tabs.addTab( "Locked Properties", scroll_locked_prop_tabs_panel )
+        self._right_panel.add( opts_tabs )
         
         # customize our UI components
         callbacks.customizeUiComponent( self._splitpane_main )
         callbacks.customizeUiComponent( opts_pane )
+        callbacks.customizeUiComponent( opts_tabs )
         callbacks.customizeUiComponent( gqueries_table )
         callbacks.customizeUiComponent( scroll_pane )
         callbacks.customizeUiComponent( tabs )
@@ -657,6 +776,21 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         callbacks.addSuiteTab( self )
 
 
+    def update_locked_props_comboboxes( self, introspection_data ):
+
+        in_prop_names = self.get_input_names( introspection_data )
+        if in_prop_names == self.in_prop_names:
+            return
+        
+        self.in_prop_names = in_prop_names
+
+        for prop_box, val_box in self.locked_req_props_elements.values():
+            prop_box.removeAllItems()
+
+            for prop_nm in self.in_prop_names:
+                prop_box.addItem( prop_nm )
+
+    
     def get_headers_text( self ):
 
         if len( self.headers_custom ) == 0:
@@ -684,28 +818,46 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         }
 
         replaced_headers = []
-        for hdr in self.headers_mandatory:
+        for hdr in self.headers_mandatory + self.headers_custom:
             
             match = re.search( re_token, hdr )
-            hdr = re.sub( re_token, replacements[ match.group(1) ], hdr )
+            if match:
+                hdr = re.sub( re_token, replacements[ match.group(1) ], hdr )
 
             replaced_headers.append( hdr )
 
-        self.headers = replaced_headers + self.headers_custom
+        self.headers = replaced_headers
 
 
     def _pull_queries( self, event ):
 
-        # TODO: (1) Validate URL
+        # TODO: (1) Show error on invalid URL
         #       (2) Provide visual feedback that introspection is in progress
-        self.gql_endpoint = self.txt_input_gql_endpoint.getText()
+        gql_endpoint_input = self.txt_input_gql_endpoint.getText()
+
+        if not self.uri_validator( gql_endpoint_input ):
+            # Show error
+            return
+        
+        self.gql_endpoint = gql_endpoint_input
         self.set_headers()
         self.draw_headers_text()
         start_new_thread( self.pull_queries, (1,) )
     
     def pull_queries( self, not_used ):
+        
+        introspection_data = None
+
+        # Try getting introspection results from URL, if fails attempt to read a local schema.json
         try:
-            self.introspection_to_queries( self.introspect() )
+            introspection_data = json.loads( self.introspect() )
+        except ValueError:
+            print(u"Bad response from server. Check the URL if you're sure that the server has Introspection enabled. Otherwise load the schema file.")
+
+        self.update_locked_props_comboboxes( introspection_data )
+        
+        try:
+            self.introspection_to_queries( introspection_data )
         except Exception as e:
             print("An unexpected error occurred: verify if you entered the correct GraphQL Endpoint URL")
             print("Details:", e)
@@ -805,8 +957,20 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
             if gquery['enabled'] == False:
                 continue
 
+            # Filled locked properties
+            gquery_s = gquery['query_s']
+            for prop_el,val_el in self.locked_req_props_elements.values():
+
+                prop = prop_el.getSelectedItem()
+                lp_qname = prop[:prop.find(":")]
+                lp_qparam = prop[prop.find(":")+2:]
+                
+                if lp_qname == gquery['name']:
+                    gquery_s = self.set_gquery_req_param( gquery_s, lp_qparam, val_el.getText() )
+                    gquery = self.create_gquery( gquery_s, gquery['type'], gquery['name'] )
+
             #callbacks.sendToIntruder( # Used to debug Insertion Points visually
-            self._callbacks.doActiveScan(
+            scan_queue_item = self._callbacks.doActiveScan(
                 url_parts.hostname,
                 self.web_port( self.gql_endpoint ),
                 url_parts.scheme == 'https',
@@ -814,7 +978,28 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
                 gquery['insertion_points']
             )
 
+            status = scan_queue_item.getStatus()
+            print(status)
 
+
+    def set_gquery_req_param( self, gquery_json, lp_qparam, lp_value ):
+
+        gquery_s = json.loads( gquery_json )['query']
+
+        default_values_rgx_str = "|".join( re.escape( str( v ) ) for v in default_req_param_vals.values() )
+
+        regex_locked_prop = ur'(\W'+re.escape(lp_qparam)+':\s*)('+default_values_rgx_str+')'
+        param_default = re.search( regex_locked_prop, gquery_s ).group(2)
+        
+        if param_default == default_req_param_vals['String']:
+
+            lp_value = '"'+lp_value+'"'
+        
+        gquery_s = re.sub( regex_locked_prop, ur'\g<1>'+lp_value, gquery_s, count=1 )
+
+        return json.dumps( { "query": gquery_s } )
+    
+    
     def introspect(self):
 
         schema_file_text = self.txt_input_gql_schema_file.getText()
@@ -877,16 +1062,8 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
             return
 
 
-    def introspection_to_queries( self, introspection_result ):
-        # Load introspection result
-        introspection_data = None
-        # Try getting introspection results from URL, if fails attempt to read a local schema.json
-        try:
-            introspection_data = json.loads(introspection_result)
-        except ValueError:
-            print(u"Bad response from server. Check the URL if you're sure that the server has Introspection enabled. Otherwise load the schema file.")
-
-
+    def introspection_to_queries( self, introspection_data ):
+        
         queries = generate(introspection_data)
 
         row_count = self.getRowCount()
@@ -904,29 +1081,57 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
                 # if any(substring in query_s.lower() for substring in ['delete','remove','clear']):
                 #     continue
                             
-                request_bytes = self._helpers.buildHttpMessage(
-                    self.headers,
-                    self._helpers.stringToBytes( query_s )
-                )
-
-                insertion_points = self.getInsertionPoints( request_bytes )
-
-                self.gqueries.add( {
-                    "type": qtype_nm,
-                    "name": qname,
-                    "query": request_bytes,
-                    "insertion_points": insertion_points,
-                    "enabled": len( insertion_points ) > 0
-                } )
+                gquery = self.create_gquery( query_s, qtype_nm, qname )
+                self.gqueries.add( gquery )
 
                 # Update table view
                 row = self.gqueries.size() - 1
                 self.fireTableRowsInserted(row, row)
 
         return self.gqueries
+    
+
+    def create_gquery( self, query_s, qtype_nm, qname ):
+
+        request_bytes = self._helpers.buildHttpMessage(
+            self.headers,
+            self._helpers.stringToBytes( query_s )
+        )
+
+        insertion_points = self.get_insertion_points( request_bytes )
+
+        return {
+            "type": qtype_nm,
+            "name": qname,
+            "query": request_bytes,
+            "insertion_points": insertion_points,
+            "enabled": len( insertion_points ) > 0,
+            "query_s": query_s
+        }
         
 
-    def getInsertionPoints( self, gql_req ):
+    def get_input_names( self, introspection_data ):
+
+        in_prop_names = []
+        s_introspection_data = simplify_introspection(introspection_data)
+
+        for qparent in s_introspection_data['type'].values():
+            for qname, qdata in qparent.items():
+                
+                if "args" not in qdata:
+                    continue
+
+                for qarg_nm in qdata['args'].keys():
+                    in_prop_names.append( qname+": "+qarg_nm )
+
+        # Dedupe and sort
+        in_prop_names = list( set( in_prop_names ) )
+        in_prop_names.sort()
+        
+        return in_prop_names
+
+    
+    def get_insertion_points( self, gql_req ):
  
         # retrieve the data parameter
         gql_req_info = self._helpers.analyzeRequest(gql_req)
@@ -947,7 +1152,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         # TODO: Support all data types. Setting payload data types for Active Scanner is a necessity but doesn't seem to be an API option.
         # Phase 2 of this TODO is adding support for custom scalars
         #regex_all_data_types = ur'[^$]\w+:\s*[\\"]*([\w*]+)[\\"]*\s*[,)]'
-        regex_strings_only = ur'(code\*)'
+        regex_strings_only = ur'(\$\w+\$)'
         for match in re.finditer( regex_strings_only, query_w_slashes ):
             insertion_points.append( array([ prefix_pad + match.start(1), prefix_pad + match.end(1) ], 'i') )
 
@@ -976,11 +1181,19 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
             return url_parts.port
 
         return 443 if url_parts.scheme.lower() == 'https' else 80
+    
+
+    def uri_validator( self, urlstr ):
+        try:
+            result = urlparse( urlstr )
+            return all([result.scheme, result.netloc])
+        except:
+            return False
 
 #
 # extend JTable to handle cell selection
 #
-class Table( JTable ):
+class QueriesTable( JTable ):
     def __init__(self, extender):
         self._extender = extender
         self.setModel(extender)
@@ -997,6 +1210,33 @@ class Table( JTable ):
             return
     
         # Show the GQL Query for the selected row
-        self._extender._requestViewer.setMessage( self._extender._helpers.bytesToString( gquery['query'] ), True )
+        is_request = True
+        self._extender._requestViewer.setMessage( self._extender._helpers.bytesToString( gquery['query'] ), is_request )
         
         JTable.changeSelection(self, row, col, toggle, extend)
+
+#
+# Extend DocumentListner for txt_input_locked_property_value "onchange"
+# ToDO: Repurpose for validation of URL and file inputs
+#
+class LockedPropValueListener( DocumentListener ):
+    
+    def __init__( self, prop_element, value_element, locked_req_props ):
+        self.prop_element = prop_element
+        self.value_element = value_element
+        self.locked_req_props = locked_req_props
+
+    def insertUpdate( self, event ):
+        print('inserted')
+        self._text_updated( event )
+
+    def removeUpdate( self, event ):
+        print('removed')
+        self._text_updated( event )
+
+    def _text_updated( self, event ):
+        value = self.value_element.getText()
+        prop = self.prop_element.getSelectedItem()
+        self.locked_req_props[ prop ] = value
+        print(prop+" -> "+value)
+        print( self.locked_req_props )
