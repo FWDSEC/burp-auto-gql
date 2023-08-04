@@ -445,8 +445,10 @@ from uuid import uuid4
 import sys
 
 #DEBUG
-# import pdb
+import pdb
 #END DEBUG
+
+SAVESTATE_PREFIX = u"AutoGQL_savestate_"
 
 class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorController ):
     
@@ -468,10 +470,11 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         # sys.stderr = callbacks.getStderr()
         #END DEBUG
 
-        self.gqueries = ArrayList()
+        saved_gqueries = callbacks.loadExtensionSetting( SAVESTATE_PREFIX+"gqueries" )
+        self.gqueries = ArrayList( json.loads( saved_gqueries ) ) if saved_gqueries else ArrayList()
         
-        self.gql_endpoint = u""
-        self.gql_schema = u""
+        self.gql_endpoint = callbacks.loadExtensionSetting( SAVESTATE_PREFIX+"gql_endpoint" ) or u""
+        self.gql_schema = callbacks.loadExtensionSetting( SAVESTATE_PREFIX+"gql_schema" ) or u""
 
         self.headers = []
         self.headers_default = [
@@ -483,13 +486,16 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
             u'Accept-Language: en-US,en;q=0.9',
             u'Connection: close'
         ]
-        self.headers_custom = []
         self.headers_mandatory = [
             u'POST @@path@@ HTTP/1.1',
             u'Host: @@netloc@@'
         ]
+        saved_headers = callbacks.loadExtensionSetting( SAVESTATE_PREFIX+"headers_custom" )
+        self.headers_custom = json.loads( saved_headers ) if saved_headers else []
         
         self.in_prop_names = []
+
+        pdb.set_trace()
 
         self.add_ui()
 
@@ -624,8 +630,10 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         label_wrap.setBorder( None )
         label_wrap.setBounds( x, y, w+2, h+2 )
         label_wrap.add( self.txt_input_gql_endpoint )
-        input_listener = TextFieldValidationListener( self.txt_input_gql_endpoint, uri_validator, self.placeholder_endpoint_text )
-        self.txt_input_gql_endpoint.getDocument().addDocumentListener( input_listener )
+        input_savestate_listener = TextFieldSaveStateListener( callbacks, self.txt_input_gql_endpoint, "gql_endpoint" )
+        self.txt_input_gql_endpoint.getDocument().addDocumentListener( input_savestate_listener )
+        input_validation_listener = TextFieldValidationListener( self.txt_input_gql_endpoint, uri_validator, self.placeholder_endpoint_text )
+        self.txt_input_gql_endpoint.getDocument().addDocumentListener( input_validation_listener )
         opts_pane.add( label_wrap )
 
         # Row 2 (GraphQL Schema File)
@@ -1225,7 +1233,7 @@ class QueriesTable( JTable ):
         JTable.changeSelection(self, row, col, toggle, extend)
 
 #
-# Extend DocumentListner for txt_input_locked_property_value "onchange"
+# Extend DocumentListner input validation
 #
 class TextFieldValidationListener( DocumentListener ):
     
@@ -1267,4 +1275,24 @@ class TextFieldValidationListener( DocumentListener ):
             self.timer.restart()  # Continue the fade effect
         else:
             self.url_pnl.setBorder(None)  # Remove the border completely when alpha becomes 0
+
+#
+# Extend DocumentListner saving the state
+#
+class TextFieldSaveStateListener( DocumentListener ):
+    
+    def __init__( self, callbacks, text_component, savestate_key ):
+        self.text_component = text_component
+        self.callbacks = callbacks
+        self.savestate_key = savestate_key
+
+    def insertUpdate( self, event ):
+        self._text_updated( event )
+
+    def removeUpdate( self, event ):
+        self._text_updated( event )
+
+    def _text_updated( self, event ):
+        text = self.text_component.getText()
+        self.callbacks.saveExtensionSetting( SAVESTATE_PREFIX+self.savestate_key, text )
 
