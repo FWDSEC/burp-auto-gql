@@ -445,7 +445,7 @@ from uuid import uuid4
 import sys
 
 #DEBUG
-import pdb
+#import pdb
 #END DEBUG
 
 SAVESTATE_PREFIX = u"AutoGQL_savestate_"
@@ -494,8 +494,6 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         self.headers_custom = json.loads( saved_headers ) if saved_headers else []
         
         self.in_prop_names = []
-
-        pdb.set_trace()
 
         self.add_ui()
 
