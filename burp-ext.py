@@ -251,7 +251,14 @@ def simplify_introspection(data):
 
     output = {}
     output[u'schema'] = {}
-    schema = data[u'data'][u'__schema']
+    schema = False
+    if u'data' in data.keys():
+        schema = data[u'data'][u'__schema']
+    elif u'__schema' in data.keys():
+        schema = data[u'__schema']
+
+    if not schema:
+        raise ValueError( "Invalid schema" )
 
     # Get the Root query type
     if schema[u'queryType'] and u'name' in schema[u'queryType']:
