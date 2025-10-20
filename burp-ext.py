@@ -433,9 +433,9 @@ def generate(argument, detect=True):
 
     return queries
 
-from burp import IBurpExtender, ITab, IMessageEditorController
+from burp import IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory
 from java.util import ArrayList
-from javax.swing import JPanel, JTabbedPane, JSplitPane, JScrollPane, JTable, JLabel, JTextField, JButton, JTextArea, JSeparator, JFileChooser, JComboBox, Timer
+from javax.swing import JPanel, JTabbedPane, JSplitPane, JScrollPane, JTable, JLabel, JTextField, JButton, JTextArea, JSeparator, JFileChooser, JComboBox, Timer, JMenuItem
 from javax.swing.filechooser import FileNameExtensionFilter
 from javax.swing.event import DocumentListener
 from java.awt import Color, GridBagLayout, GridBagConstraints, Insets, BorderLayout
@@ -455,7 +455,7 @@ import sys
 # import pdb
 #END DEBUG
 
-class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorController ):
+class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorController, IContextMenuFactory ):
     
     #
     # implement IBurpExtender
@@ -497,6 +497,9 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         ]
         
         self.in_prop_names = []
+
+        # Register context menu factory
+        callbacks.registerContextMenuFactory( self )
 
         self.add_ui()
 
@@ -1196,6 +1199,115 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
             return url_parts.port
 
         return 443 if url_parts.scheme.lower() == 'https' else 80
+    
+
+    #
+    # implement IContextMenuFactory
+    #
+    
+    def createMenuItems( self, invocation ):
+        
+        menu_list = ArrayList()
+        
+        # Only show menu for requests
+        ctx = invocation.getInvocationContext()
+        if ctx in [invocation.CONTEXT_MESSAGE_EDITOR_REQUEST, invocation.CONTEXT_MESSAGE_VIEWER_REQUEST, 
+                   invocation.CONTEXT_PROXY_HISTORY, invocation.CONTEXT_TARGET_SITE_MAP_TABLE,
+                   invocation.CONTEXT_INTRUDER_PAYLOAD_POSITIONS, invocation.CONTEXT_INTRUDER_ATTACK_RESULTS]:
+            
+            menu_item = JMenuItem( "Send request to Auto GQL", actionPerformed=lambda event: self._send_to_auto_gql( invocation ) )
+            menu_list.add( menu_item )
+            
+            menu_item_headers = JMenuItem( "Send headers to Auto GQL", actionPerformed=lambda event: self._send_headers_to_auto_gql( invocation ) )
+            menu_list.add( menu_item_headers )
+        
+        return menu_list if menu_list.size() > 0 else None
+
+
+    def _send_to_auto_gql( self, invocation ):
+        
+        messages = invocation.getSelectedMessages()
+        if messages is None or len( messages ) == 0:
+            return
+        
+        http_request_response = messages[0]
+        http_service = http_request_response.getHttpService()
+        request_info = self._helpers.analyzeRequest( http_request_response )
+        
+        # Build the URL
+        protocol = "https" if http_service.getProtocol() == "https" else "http"
+        host = http_service.getHost()
+        port = http_service.getPort()
+        url_path = request_info.getUrl().getPath()
+        
+        if (protocol == "https" and port == 443) or (protocol == "http" and port == 80):
+            endpoint_url = u"{}://{}{}".format( protocol, host, url_path )
+        else:
+            endpoint_url = u"{}://{}:{}{}".format( protocol, host, port, url_path )
+        
+        # Set the endpoint URL in the UI
+        self.gql_endpoint = endpoint_url
+        self.txt_input_gql_endpoint.setText( endpoint_url )
+        
+        # Extract and set headers
+        headers = request_info.getHeaders()
+        self._populate_headers_from_request( headers, endpoint_url )
+        
+        print( u"Auto GQL: Populated endpoint URL: " + endpoint_url )
+
+
+    def _send_headers_to_auto_gql( self, invocation ):
+        
+        messages = invocation.getSelectedMessages()
+        if messages is None or len( messages ) == 0:
+            return
+        
+        http_request_response = messages[0]
+        request_info = self._helpers.analyzeRequest( http_request_response )
+        
+        # Get current endpoint or build from request
+        http_service = http_request_response.getHttpService()
+        protocol = "https" if http_service.getProtocol() == "https" else "http"
+        host = http_service.getHost()
+        port = http_service.getPort()
+        url_path = request_info.getUrl().getPath()
+        
+        if (protocol == "https" and port == 443) or (protocol == "http" and port == 80):
+            endpoint_url = u"{}://{}{}".format( protocol, host, url_path )
+        else:
+            endpoint_url = u"{}://{}:{}{}".format( protocol, host, port, url_path )
+        
+        # Extract and set headers only
+        headers = request_info.getHeaders()
+        self._populate_headers_from_request( headers, endpoint_url )
+        
+        print( u"Auto GQL: Populated headers from request" )
+
+
+    def _populate_headers_from_request( self, headers, endpoint_url ):
+        
+        custom_headers = []
+        
+        # Skip the first line (request line) and process the rest
+        for i in range( 1, len( headers ) ):
+            header = headers[i]
+            
+            # Skip headers that will be added automatically
+            header_lower = header.lower()
+            if header_lower.startswith( u'host:' ) or header_lower.startswith( u'content-length:' ):
+                continue
+            
+            # Keep other headers
+            custom_headers.append( header )
+        
+        # Update the headers in the extension
+        self.headers_custom = custom_headers
+        self.draw_headers_text()
+        
+        # Set headers for requests
+        if endpoint_url:
+            self.gql_endpoint = endpoint_url
+            self.set_headers()
     
 # Global Helpers
 
