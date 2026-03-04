@@ -476,6 +476,8 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         #END DEBUG
 
         self.gqueries = ArrayList()
+        self.gqueries_filtered = ArrayList()
+        self.search_text = u""
         
         self.gql_endpoint = u""
         self.gql_schema = u""
@@ -581,10 +583,25 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         
         # Queries Table - Left-Top
         gqueries_table = QueriesTable(self)
-        # TODO: Disabled sorting until I fix the changeSelection to work with sorting
-        #gqueries_table.setRowSorter( TableRowSorter(self) )
         scroll_pane = JScrollPane( gqueries_table )
-        self._splitpane_left.setLeftComponent( scroll_pane )
+
+        # Search bar above the table
+        search_panel = JPanel()
+        search_panel.setLayout( BorderLayout() )
+        search_label = JLabel( " Search: " )
+        self.txt_search = JTextField()
+        self.txt_search.setFont( Font( Font.MONOSPACED, Font.PLAIN, 13 ) )
+        search_listener = SearchFilterListener( self )
+        self.txt_search.getDocument().addDocumentListener( search_listener )
+        callbacks.customizeUiComponent( self.txt_search )
+        search_panel.add( search_label, BorderLayout.WEST )
+        search_panel.add( self.txt_search, BorderLayout.CENTER )
+
+        table_panel = JPanel()
+        table_panel.setLayout( BorderLayout() )
+        table_panel.add( search_panel, BorderLayout.NORTH )
+        table_panel.add( scroll_pane, BorderLayout.CENTER )
+        self._splitpane_left.setLeftComponent( table_panel )
 
         # Request viewer - Left-Bottom
         tabs = JTabbedPane()
@@ -736,6 +753,12 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         btn_fetch_queries.setBounds( 40, y, 150, h )
         callbacks.customizeUiComponent( btn_fetch_queries )
         opts_pane.add( btn_fetch_queries )
+
+        ## Send to Sitemap button
+        btn_send_to_sitemap = JButton( "Send to Sitemap", actionPerformed=self._send_to_sitemap )
+        btn_send_to_sitemap.setBounds( 200, y, 150, h )
+        callbacks.customizeUiComponent( btn_send_to_sitemap )
+        opts_pane.add( btn_send_to_sitemap )
 
         # TAB - "Locked Properties"
         self.locked_prop_tabs_panel = JPanel()
@@ -907,7 +930,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
     
     def getRowCount(self):
         try:
-            return self.gqueries.size()
+            return self.gqueries_filtered.size()
         except:
             return 0
 
@@ -932,14 +955,14 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         return String
 
     def getValueAt(self, row_index, column_index):
-        gquery = self.gqueries.get( row_index )
+        gquery = self.gqueries_filtered.get( row_index )
 
         cols = [
-            gquery['enabled'], # Checkbox
-            row_index + 1, # Row number
-            gquery[ 'type' ], #Query Type (Query, Mutation, or Subscription)
-            gquery['name'], # Query Name
-            len( gquery['insertion_points'] ) # Number of Insertion Points
+            gquery['enabled'],
+            row_index + 1,
+            gquery[ 'type' ],
+            gquery['name'],
+            len( gquery['insertion_points'] )
         ]
 
         if column_index < len(cols):
@@ -999,6 +1022,47 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
             status = scan_queue_item.getStatus()
             # TODO: Display scan status
 
+
+    def _send_to_sitemap( self, event ):
+
+        if self.gql_endpoint.strip() == '' or self.gql_endpoint == self.placeholder_endpoint_text:
+            print( u"URL is required for sending to sitemap." )
+            return
+
+        if self.gqueries.size() > 0:
+            start_new_thread( self.send_to_sitemap, (1,) )
+
+    def send_to_sitemap( self, not_used ):
+
+        url_parts = urlparse( self.gql_endpoint )
+        count = 0
+
+        for gquery in self.gqueries:
+
+            if gquery['enabled'] == False:
+                continue
+
+            gquery_s = gquery['query_s']
+            for prop_el, val_el in self.locked_req_props_elements.values():
+                prop = prop_el.getSelectedItem()
+                lp_qname = prop[:prop.find(":")]
+                lp_qparam = prop[prop.find(":")+2:]
+                if lp_qname == gquery['name']:
+                    gquery_s = self.set_gquery_req_param( gquery_s, lp_qparam, val_el.getText() )
+
+            gquery = self.create_gquery( gquery_s, gquery['type'], gquery['name'] )
+
+            http_service = self._helpers.buildHttpService(
+                url_parts.hostname,
+                self.web_port( self.gql_endpoint ),
+                url_parts.scheme
+            )
+
+            response = self._callbacks.makeHttpRequest( http_service, gquery['query'] )
+            self._callbacks.addToSiteMap( response )
+            count += 1
+
+        print( u"Auto GQL: Sent %d queries to sitemap" % count )
 
     def set_gquery_req_param( self, gquery_json, lp_qparam, lp_value ):
 
@@ -1088,6 +1152,7 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
         if row_count > 0:
             self.fireTableRowsDeleted( 0, row_count - 1 )
             self.gqueries.clear()
+            self.gqueries_filtered.clear()
 
         for qtype_nm, qtype in queries.items():
             for qname,query in qtype.items():
@@ -1102,9 +1167,9 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
                 gquery = self.create_gquery( query_s, qtype_nm, qname )
                 self.gqueries.add( gquery )
 
-                # Update table view
-                row = self.gqueries.size() - 1
-                self.fireTableRowsInserted(row, row)
+        self.search_text = u""
+        self.txt_search.setText( u"" )
+        self.apply_search_filter()
 
         return self.gqueries
     
@@ -1190,6 +1255,18 @@ class BurpExtender( IBurpExtender, ITab, AbstractTableModel, IMessageEditorContr
                     base_request,
                     prefix_pad + re_match.start(),
                     prefix_pad + re_match.end() )
+
+    def apply_search_filter( self ):
+
+        self.gqueries_filtered.clear()
+        search = self.search_text.lower().strip()
+
+        for i in range( self.gqueries.size() ):
+            gquery = self.gqueries.get( i )
+            if search == u"" or search in gquery['name'].lower() or search in gquery['type'].lower():
+                self.gqueries_filtered.add( gquery )
+
+        self.fireTableDataChanged()
 
     def web_port( self, url ):
 
@@ -1328,20 +1405,39 @@ class QueriesTable( JTable ):
     
     def changeSelection(self, row, col, toggle, extend):
 
-        gquery = self._extender.gqueries.get( row )
+        gquery = self._extender.gqueries_filtered.get( row )
 
         if col == 0:
 
             gquery['enabled'] = not gquery['enabled']
-            self._extender.gqueries.set( row, gquery )
             self._extender.fireTableRowsUpdated( row, row )
             return
     
-        # Show the GQL Query for the selected row
         is_request = True
         self._extender._requestViewer.setMessage( self._extender._helpers.bytesToString( gquery['query'] ), is_request )
         
         JTable.changeSelection(self, row, col, toggle, extend)
+
+#
+# Extend DocumentListener for search filter
+#
+class SearchFilterListener( DocumentListener ):
+
+    def __init__( self, extender ):
+        self.extender = extender
+
+    def insertUpdate( self, event ):
+        self._update()
+
+    def removeUpdate( self, event ):
+        self._update()
+
+    def changedUpdate( self, event ):
+        self._update()
+
+    def _update( self ):
+        self.extender.search_text = self.extender.txt_search.getText()
+        self.extender.apply_search_filter()
 
 #
 # Extend DocumentListner for txt_input_locked_property_value "onchange"
