@@ -37,7 +37,7 @@
 
 ## To Do:
 1. Separate into multiple files, and add build step to unify it back to one. (Burp requires that it be one file)
-2. Allow for user to manually alter injection points visually.
+3. Allow for user to manually alter injection points visually.
 4. Allow for importing a Schema file as an alternative option to Introspection.
 5. Allow for payload transformations (base64, etc.)
 6. Maybe convert the whole thing to Java? I picked Python because Burp supports it, and I use it more regularly than Java. Plus all the Python libraries, right? Turns out this was not the best route. Burp *supports* Python, but is written in Java, so all Python support is due to Jython. This requires that the plugin be built in Python2, can't use external libraries (without some extra work from the end user), and has all sorts of fun data type issues that require detours to the Jython documentation. Not to mentinon that it all has to be in one file, which means having to write a Makefile or some other build step. Using Java would solve all those problems, plus the Burp documentation is all geared towards it. Let my toiling save you from your own. Write your Burp extension in Java.
